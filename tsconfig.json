@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "sourceMap": true,
+    "outDir": "./dist",
+    "strict": false,            
+    "lib": ["esnext"],
+    "esModuleInterop": true,
+    "target": "es2019",
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "prisma/**/*", "src/types/**/*.d.ts"]
+}
