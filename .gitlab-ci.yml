@@ -1,0 +1,64 @@
+stages:
+  - deploy
+
+# ==========================================
+# TEMPLATE LOGIKA DEPLOY BACKEND (LINUX)
+# ==========================================
+.deploy_template:
+  stage: deploy
+  tags:
+    - vps-ubuntu
+  script:
+    - echo "=========================================="
+    - echo "Mulai Deploy Backend ke Lingkungan $ENV_NAME"
+    - echo "Target Folder $TARGET_DIR"
+    - echo "Target Container $SERVICE_NAME"
+    - echo "=========================================="
+
+    # 1. Pindahkan file kodingan terbaru ke folder aplikasi di VPS menggunakan rsync
+    # (rsync sangat bagus karena akan menimpa file lama dan mengabaikan folder .git)
+    - rsync -av --exclude='.git' ./ "$TARGET_DIR/eps-pos-backend/"
+
+    # 2. Pindah ke direktori utama tempat docker-compose.yml berada
+    - cd "$TARGET_DIR"
+
+    # 3. Build ulang dan jalankan container yang spesifik
+    - docker compose up -d --force-recreate --build $SERVICE_NAME
+
+    - echo "Deploy Backend ke $ENV_NAME Berhasil Diselesaikan!"
+
+# ==========================================
+# 1. JALUR DEVELOPMENT (Branch: dev)
+# ==========================================
+deploy_dev:
+  extends: .deploy_template
+  variables:
+    ENV_NAME: "DEVELOPMENT"
+    TARGET_DIR: "/opt/epspos/EPSPOS-DEV"
+    SERVICE_NAME: "eps-app-dev"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+
+# ==========================================
+# 2. JALUR STAGING (Branch: staging)
+# ==========================================
+deploy_staging:
+  extends: .deploy_template
+  variables:
+    ENV_NAME: "STAGING"
+    TARGET_DIR: "/opt/epspos/EPSPOS-STAGGING"
+    SERVICE_NAME: "eps-app-stagging"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "stagging"
+
+# ==========================================
+# 3. JALUR PRODUCTION (Branch: main)
+# ==========================================
+deploy_prod:
+  extends: .deploy_template
+  variables:
+    ENV_NAME: "PRODUCTION"
+    TARGET_DIR: "/opt/epspos/EPSPOS"
+    SERVICE_NAME: "eps-app"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"

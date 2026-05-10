@@ -1,164 +1,109 @@
-import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+// src/controllers/member.controller.ts
+import { Request, Response } from "express";
+import prisma from "../config/prisma";
+import { PointType } from "@prisma/client";
 
-const prisma = new PrismaClient();
-/**
- * MENGAMBIL DAFTAR MEMBER
- * Owner: Bisa melihat semua atau filter per cabang
- * Manager: Hanya melihat member di cabangnya sendiri
- */
-export const getMembers = async (req: Request, res: Response) => {
-    try {
-        const user = (req as any).user;
-        const { branchId, search } = req.query;
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    tenantId: string;
+    branchId: string | null;
+    roleId: string;
+    email: string;
+  };
+}
 
-        let whereClause: any = {};
-
-        // Filter berdasarkan Role
-        if (user.role === 'OWNER') {
-            if (branchId && branchId !== 'all') {
-                whereClause.branchId = branchId;
-            }
-        } else {
-            // Manager dikunci ke cabangnya sendiri
-            whereClause.branchId = user.branchId;
-        }
-
-        // Filter Pencarian Nama atau HP
-        if (search) {
-            whereClause.OR = [
-                { name: { contains: search as string, mode: 'insensitive' } },
-                { phone: { contains: search as string } }
-            ];
-        }
-
-        const members = await prisma.member.findMany({
-            where: whereClause,
-            include: { 
-                branch: { select: { name: true } } // Mengambil nama cabang untuk UI
-            },
-            orderBy: { createdAt: 'desc' }
-        });
-
-        res.json(members);
-    } catch (error) {
-        res.status(500).json({ message: "Gagal mengambil data member" });
-    }
+export const getMembers = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const tenantId = req.user!.tenantId;
+    // Ambil member yang mendaftar di cabang-cabang milik tenant ini
+    const members = await prisma.member.findMany({
+      where: { branch: { tenantId } },
+      orderBy: { points: "desc" },
+      include: { branch: { select: { name: true } } },
+    });
+    res.status(200).json({ success: true, data: members });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ success: false, message: "Terjadi kesalahan server", error });
+  }
 };
 
-/**
- * MENAMBAH MEMBER BARU
- */
-export const createMember = async (req: Request, res: Response) => {
-    try {
-        const user = (req as any).user;
-        const { name, phone, email, branchId } = req.body;
+export const createMember = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { branchId, name, phone, email } = req.body;
 
-        // Validasi: Manager tidak boleh membuat member di cabang lain
-        const targetBranchId = user.role === 'OWNER' ? (branchId || user.branchId) : user.branchId;
-
-        const newMember = await prisma.member.create({
-            data: {
-                name,
-                phone,
-                email,
-                branchId: targetBranchId
-            }
+    const existing = await prisma.member.findUnique({ where: { phone } });
+    if (existing) {
+      res
+        .status(400)
+        .json({
+          success: false,
+          message: "Nomor HP sudah terdaftar sebagai member",
         });
-
-        res.status(201).json(newMember);
-    } catch (error: any) {
-        // Cek jika nomor HP duplikat (Unique constraint di Prisma)
-        if (error.code === 'P2002') {
-            return res.status(400).json({ message: "Nomor HP sudah terdaftar" });
-        }
-        res.status(500).json({ message: "Gagal menambah member" });
+      return;
     }
+
+    const member = await prisma.member.create({
+      data: { branchId, name, phone, email, points: 0 },
+    });
+
+    res
+      .status(201)
+      .json({
+        success: true,
+        data: member,
+        message: "Member berhasil didaftarkan",
+      });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ success: false, message: "Gagal mendaftarkan member", error });
+  }
 };
 
-/**
- * MEMPERBARUI DATA MEMBER
- */
-export const updateMember = async (req: Request, res: Response) => {
-    try {
-        const user = (req as any).user;
-        const { id } = req.params;
-        const { name, phone, email, branchId } = req.body;
+export const adjustPoints = async (
+  req: AuthRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const memberId = req.params.id;
+    const { amount, description } = req.body;
 
-        // Cek apakah member ada
-        const existingMember = await prisma.member.findUnique({ where: { id } });
-        if (!existingMember) return res.status(404).json({ message: "Member tidak ditemukan" });
+    const result = await prisma.$transaction(async (tx) => {
+      const updated = await tx.member.update({
+        where: { id: memberId },
+        data: { points: { increment: amount } },
+      });
 
-        // Proteksi: Manager tidak boleh edit member cabang lain
-        if (user.role !== 'OWNER' && existingMember.branchId !== user.branchId) {
-            return res.status(403).json({ message: "Anda tidak memiliki akses ke data ini" });
-        }
+      await tx.memberPointHistory.create({
+        data: {
+          memberId,
+          type: PointType.ADJUSTMENT,
+          amount,
+          description,
+        },
+      });
+      return updated;
+    });
 
-        const updatedMember = await prisma.member.update({
-            where: { id },
-            data: {
-                name,
-                phone,
-                email,
-                branchId: user.role === 'OWNER' ? (branchId || existingMember.branchId) : user.branchId
-            }
-        });
-
-        res.json(updatedMember);
-    } catch (error: any) {
-        if (error.code === 'P2002') {
-            return res.status(400).json({ message: "Nomor HP sudah digunakan oleh member lain" });
-        }
-        res.status(500).json({ message: "Gagal memperbarui data member" });
-    }
-};
-
-/**
- * MENGHAPUS MEMBER
- */
-export const deleteMember = async (req: Request, res: Response) => {
-    try {
-        const user = (req as any).user;
-        const { id } = req.params;
-
-        // Cek akses sebelum hapus
-        if (user.role !== 'OWNER') {
-            const member = await prisma.member.findUnique({ where: { id } });
-            if (member?.branchId !== user.branchId) {
-                return res.status(403).json({ message: "Akses ditolak" });
-            }
-        }
-
-        await prisma.member.delete({ where: { id } });
-        res.json({ message: "Member berhasil dihapus" });
-    } catch (error) {
-        res.status(500).json({ message: "Gagal menghapus member" });
-    }
-};
-
-
-export const verifyMember = async (req: Request, res: Response) => {
-    try {
-        // Ambil dari params karena rutenya /:phone
-        const { phone } = req.params; 
-
-        if (!phone) {
-            return res.status(400).json({ message: "Nomor HP diperlukan" });
-        }
-
-        const member = await prisma.member.findFirst({
-            where: { 
-                phone: String(phone), // Pastikan tipe data sesuai (String)
-                isActive: true 
-            }
-        });
-
-        if (!member) {
-            return res.status(404).json({ message: "Member tidak ditemukan" });
-        }
-
-        res.json(member);
-    } catch (error) {
-        res.status(500).json({ message: "Error server saat verifikasi member" });
-    }
+    res
+      .status(200)
+      .json({
+        success: true,
+        data: result,
+        message: "Poin member berhasil disesuaikan",
+      });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ success: false, message: "Gagal menyesuaikan poin" });
+  }
 };

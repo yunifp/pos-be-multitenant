@@ -2,22 +2,25 @@
 
 generator client {
   provider = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-// --- ENUMS ---
+// ==========================================
+// ENUMS
+// ==========================================
 
-enum Role {
+enum JobPosition {
   OWNER
   MANAGER
   CASHIER
-  KITCHEN
+  KITCHEN_STAFF
   WAITER
+  BARISTA
+  WAREHOUSE_STAFF
 }
 
 enum OrderStatus {
@@ -36,6 +39,8 @@ enum PaymentStatus {
   PARTIAL
 }
 
+// PaymentMethod enum is no longer strictly used for the Order model, 
+// but kept for backward compatibility or default seeded values if needed.
 enum PaymentMethod {
   CASH
   QRIS
@@ -60,9 +65,11 @@ enum AttendanceStatus {
 }
 
 enum CashFlowType {
-  INCOME
-  EXPENSE
-  OPERATIONAL
+  INCOME_SALES // Pemasukan dari Penjualan
+  INCOME_OTHER // Pemasukan lain (Suntikan dana, dll)
+  EXPENSE_MATERIAL // Pengeluaran belanja bahan baku
+  EXPENSE_OPERATIONAL // Pengeluaran operasional (listrik, gaji)
+  EXPENSE_OTHER // Pengeluaran lain-lain
 }
 
 enum PromotionType {
@@ -84,238 +91,549 @@ enum RefundStatus {
 }
 
 enum PointType {
-  EARNED    // Mendapatkan poin dari belanja
-  REDEEMED  // Menggunakan poin untuk diskon
-  REFUNDED  // Poin dikembalikan karena refund
-  ADJUSTMENT // Koreksi manual oleh admin
+  EARNED
+  REDEEMED
+  REFUNDED
+  ADJUSTMENT
 }
 
-// --- 1. SETTING & CABANG ---
+// Format Dokumen
+enum DocumentFormat {
+  RECEIPT
+  INVOICE
+}
+
+// Status Distribusi
+enum DistributionStatus {
+  DRAFT
+  IN_TRANSIT
+  RECEIVED
+  CANCELLED
+}
+
+// Mode Pembayaran
+enum PaymentChannel {
+  BASIC
+  GATEWAY
+}
+
+// ==========================================
+// 1. SAAS MULTI-TENANT CORE (Control Plane Sync)
+// ==========================================
+
+model Tenant {
+  id       String  @id @default(uuid())
+  name     String // Nama Perusahaan/Bisnis
+  email    String  @unique
+  phone    String?
+  isActive Boolean @default(true) @map("is_active")
+
+  // Sinkronisasi dengan Control Plane Eksternal
+  externalPlanId String?  @map("external_plan_id")
+  activeFeatures String[] @map("active_features") // Cache array fitur (contoh: ["INVENTORY", "QUEUE"])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relasi ke Data Milik Tenant
+  branches       Branch[]
+  users          User[]
+  roles          Role[]
+  categories     Category[]
+  materials      Material[]
+  warehouses     Warehouse[]
+  generalSetting GeneralSetting?
+  products       Product[]
+
+  @@map("tenants")
+}
+
+// ==========================================
+// 2. DYNAMIC RBAC (Role-Based Access Control)
+// ==========================================
+
+model Role {
+  id          String  @id @default(uuid())
+  tenantId    String  @map("tenant_id")
+  name        String // cth: "Super Admin", "Kasir Reguler", "Manager Gudang"
+  description String?
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  permissions RolePermission[]
+  users       User[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String  @id @default(uuid())
+  module      String // cth: "INVENTORY", "FINANCE", "ORDER"
+  action      String // cth: "CREATE", "READ", "UPDATE", "DELETE"
+  code        String  @unique // cth: "INVENTORY_CREATE"
+  description String?
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String @id @default(uuid())
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ==========================================
+// 3. SETTING & CABANG
+// ==========================================
 
 model GeneralSetting {
-  id                   Int      @id @default(1)
-  appName              String   @default("EPS POS") @map("app_name")
-  tagline              String?  @map("tagline")
-  storeName            String   @default("EPISODE KOPI") @map("store_name")
-  logoUrl              String?  @map("logo_url")
-  loginBgUrl           String?  @map("login_bg_url")
-  themePrimaryColor    String   @default("#4F46E5") @map("theme_primary_color")
-  themeSecondaryColor  String   @default("#0F172A") @map("theme_secondary_color")
-  themeBackgroundColor String   @default("#F3F4F6") @map("theme_background_color")
-  taxRate              Decimal  @default(0) @map("tax_rate") @db.Decimal(5, 2)
-  serviceChargeRate    Decimal  @default(0) @map("service_charge_rate") @db.Decimal(5, 2)
-  currencySymbol       String   @default("Rp") @map("currency_symbol")
-  address              String?
-  phone                String?
-  email                String?
-  website              String?
+  id                String  @id @default(uuid())
+  tenantId          String  @unique @map("tenant_id")
+  appName           String  @default("EPS POS") @map("app_name")
+  storeName         String  @map("store_name")
+  logoUrl           String? @map("logo_url")
+  taxRate           Decimal @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  serviceChargeRate Decimal @default(0) @map("service_charge_rate") @db.Decimal(5, 2)
+  currencySymbol    String  @default("Rp") @map("currency_symbol")
 
-  pointsPerAmount   Int     @default(10000) // Contoh: 10.000
-  pointsEarned      Int     @default(1)     // Dapatkan 1 point
-  pointValue        Int     @default(1)     // 1 point = Rp 1
-  minOrderToEarn    Float   @default(0)     // Minimal belanja untuk dapat poin
-  maxRedeemPercent  Int     @default(50)    // Maksimal poin tutup 50% total bill
-  isActive          Boolean @default(true)  // Apakah program poin aktif
+  // Loyalti
+  pointsPerAmount Int @default(10000)
+  pointValue      Int @default(1)
 
-  updatedAt            DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  updatedAt DateTime @updatedAt
 
   @@map("general_settings")
 }
 
-model ReceiptSetting {
-  id                String   @id @default(uuid())
-  branchId          String   @unique @map("branch_id")
-  
-  // --- Identitas Visual ---
-  showLogo          Boolean  @default(true) @map("show_logo")
-  logoSize          Int      @default(80) @map("logo_size") // Dalam pixel atau persentase
-  grayscaleLogo     Boolean  @default(true) @map("grayscale_logo")
-  
-  // --- Header Teks ---
-  storeName         String?  @map("store_name") // Override nama store jika perlu
-  headerAddress     String?  @map("header_address") @db.Text
-  headerPhone       String?  @map("header_phone")
-  headerEmail       String?  @map("header_email")
-  headerWebsite     String?  @map("header_website")
-  headerTaxId       String?  @map("header_tax_id") // NPWP Store
-  
-  // --- Informasi Transaksi ---
-  showCashierName   Boolean  @default(true) @map("show_cashier_name")
-  showCustomerName  Boolean  @default(true) @map("show_customer_name")
-  showOrderType     Boolean  @default(true) @map("show_order_type") // Dine In/Take Away
-  showTableNumber   Boolean  @default(true) @map("show_table_number")
-  
-  // --- Pengaturan Item ---
-  showVariantName   Boolean  @default(true) @map("show_variant_name")
-  showItemSku       Boolean  @default(false) @map("show_item_sku")
-  showItemDiscount  Boolean  @default(true) @map("show_item_discount")
-  showItemNotes     Boolean  @default(true) @map("show_item_notes")
-  compactMode       Boolean  @default(false) @map("compact_mode") // Baris lebih rapat
-  
-  // --- Pengaturan Footer & Tambahan ---
-  footerMessage     String?  @map("footer_message") @db.Text
-  showSocialMedia   Boolean  @default(false) @map("show_social_media")
-  instagramHandle   String?  @map("instagram_handle")
-  
-  // --- Kebijakan & Promo ---
-  showPointsEarned  Boolean  @default(true) @map("show_points_earned")
-  showBarcode       Boolean  @default(true) @map("show_barcode") // Scan barcode untuk invoice
-  isRefundPolicy    String?  @map("refund_policy") @db.Text // Teks kebijakan pengembalian
-  
-  // --- Format Teknis ---
-  paperWidth        Int      @default(58) @map("paper_width") // 58mm atau 80mm
-  fontSize          String   @default("MEDIUM") @map("font_size") // SMALL, MEDIUM, LARGE
-  fontFamily        String   @default("Monospace") @map("font_family")
-  
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  branch            Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
-
-  @@map("receipt_settings")
-}
 model Branch {
-  id        String    @id @default(uuid())
-  name      String
-  address   String?
-  phone     String?
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
+  id       String  @id @default(uuid())
+  tenantId String  @map("tenant_id")
+  name     String
+  address  String?
+  phone    String?
 
-  // [BARU] Geofencing Data
-  latitude  Float @default(0) // Contoh: -6.175392
-  longitude Float @default(0) // Contoh: 106.827153
-  radius    Int   @default(50) // Toleransi dalam meter (misal 50 meter)
+  // Fitur Antrian (Req 6)
+  enableOrderQueue Boolean @default(true) @map("enable_order_queue")
 
-  // Relations
-  users               User[]
-  availableCategories Category[]       @relation("CategoryAvailability")
-  products            Product[] // [FIXED] Nama relasi disederhanakan
-  availablePromos     Promotion[]      @relation("PromoAvailability")
-  productStocks       ProductStock[]
-  orders              Order[]
-  cashFlows           CashFlow[]
-  inventoryStocks     InventoryStock[]
-  shifts              Shift[]
-  members             Member[]
-  receiptSetting    ReceiptSetting?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users                 User[]
+  products              Product[]
+  branchMaterialStocks  BranchMaterialStock[]
+  orders                Order[]
+  cashFlows             CashFlow[]
+  receiptSetting        ReceiptSetting?
+  paymentIntegration    PaymentIntegration?
+  incomingDistributions MaterialDistribution[] @relation("DestinationBranch")
+  shifts                Shift[]
+  branchPaymentMethods  BranchPaymentMethod[] // Relasi baru untuk metode pembayaran cabang
+
+  availablePromos Promotion[] @relation("PromoAvailability")
+  members         Member[]
 
   @@map("branches")
 }
 
+model ReceiptSetting {
+  id       String @id @default(uuid())
+  branchId String @unique @map("branch_id")
+
+  // Fitur Struk / Invoice (Req 5)
+  documentFormat     DocumentFormat @default(RECEIPT) @map("document_format")
+  invoicePrefix      String?        @map("invoice_prefix") // Jika INVOICE, cth: "INV-"
+  dueDaysDefault     Int            @default(0) @map("due_days_default") // Jatuh tempo invoice
+  termsAndConditions String?        @map("terms_and_conditions") @db.Text
+
+  storeName     String? @map("store_name")
+  footerMessage String? @map("footer_message")
+  paperWidth    Int     @default(58) @map("paper_width")
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@map("receipt_settings")
+}
+
+model PaymentIntegration {
+  id       String @id @default(uuid())
+  branchId String @unique @map("branch_id")
+
+  // Fitur Gateway Midtrans (Req 7)
+  channelType       PaymentChannel @default(BASIC) @map("channel_type")
+  midtransServerKey String?        @map("midtrans_server_key")
+  midtransClientKey String?        @map("midtrans_client_key")
+  isProduction      Boolean        @default(false) @map("is_production")
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@map("payment_integrations")
+}
+
+// Model baru untuk konfigurasi metode pembayaran per cabang
+model BranchPaymentMethod {
+  id       String         @id @default(uuid())
+  branchId String         @map("branch_id")
+  name     String // Contoh: "QRIS", "Transfer Bank", "Tunai"
+  channel  PaymentChannel @default(BASIC) // BASIC (Manual) atau GATEWAY
+
+  // Konfigurasi Biaya (Fee)
+  feePercentage Decimal @default(0) @db.Decimal(5, 2) // Contoh: 0.7 untuk QRIS (0.7%)
+  feeFlat       Decimal @default(0) @db.Decimal(15, 2) // Contoh: 4500 untuk VA
+
+  isActive Boolean @default(true) @map("is_active")
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, name])
+  @@map("branch_payment_methods")
+}
+
 model User {
-  id           String    @id @default(uuid())
-  branchId     String?   @map("branch_id")
-  email        String    @unique
-  passwordHash String    @map("password_hash")
-  pinHash      String?   @map("pin_hash")
-  fullName     String    @map("full_name")
-  role         Role      @default(CASHIER)
-  phone        String?
-  isActive     Boolean   @default(true) @map("is_active")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  deletedAt    DateTime? @map("deleted_at")
+  id       String  @id @default(uuid())
+  tenantId String  @map("tenant_id")
+  branchId String? @map("branch_id")
+  roleId   String  @map("role_id") // Relasi RBAC
 
-  branch         Branch?         @relation(fields: [branchId], references: [id])
-  orders         Order[]         @relation("CashierOrders")
-  cashFlows      CashFlow[]      @relation("CashFlowRecorder")
-  attendances    Attendance[]
-  assignedShifts EmployeeShift[]
-  requestedRefunds RefundRequest[] @relation("RequestedRefunds")
-  approvedRefunds  RefundRequest[] @relation("ApprovedRefunds")
+  email        String      @unique
+  passwordHash String      @map("password_hash")
+  fullName     String      @map("full_name")
+  jobPosition  JobPosition @default(CASHIER) @map("job_position")
+  isActive     Boolean     @default(true) @map("is_active")
 
-  @@index([branchId])
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch? @relation(fields: [branchId], references: [id])
+  role   Role    @relation(fields: [roleId], references: [id])
+
+  orders               Order[]
+  cashFlows            CashFlow[]
+  distributionsCreated MaterialDistribution[]
+  attendances          Attendance[]
+  assignedShifts       EmployeeShift[]
+  requestedRefunds     RefundRequest[]        @relation("RequestedRefunds")
+  approvedRefunds      RefundRequest[]        @relation("ApprovedRefunds")
+
   @@map("users")
 }
 
-// --- 2. PRODUK & KATEGORI ---
+// ==========================================
+// 4. INVENTORY & GUDANG (Req 2 & 3)
+// ==========================================
+
+model Warehouse {
+  id       String  @id @default(uuid())
+  tenantId String  @map("tenant_id")
+  name     String // cth: "Gudang Utama Pusat"
+  address  String?
+
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stocks                WarehouseStock[]
+  outgoingDistributions MaterialDistribution[] @relation("SourceWarehouse")
+
+  @@map("warehouses")
+}
+
+model Material {
+  id          String  @id @default(uuid())
+  tenantId    String  @map("tenant_id")
+  name        String // cth: "Biji Kopi Arabica", "Susu UHT"
+  unit        String // cth: "Gram", "Liter", "Pcs"
+  costPerUnit Decimal @default(0) @map("cost_per_unit") @db.Decimal(15, 2)
+
+  tenant            Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  warehouseStocks   WarehouseStock[]
+  branchStocks      BranchMaterialStock[]
+  recipes           Recipe[]
+  distributionItems MaterialDistributionItem[]
+
+  @@map("materials")
+}
+
+model WarehouseStock {
+  id          String  @id @default(uuid())
+  warehouseId String  @map("warehouse_id")
+  materialId  String  @map("material_id")
+  quantity    Decimal @default(0) @db.Decimal(15, 3)
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  material  Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([warehouseId, materialId])
+  @@map("warehouse_stocks")
+}
+
+model BranchMaterialStock {
+  id         String  @id @default(uuid())
+  branchId   String  @map("branch_id")
+  materialId String  @map("material_id")
+  quantity   Decimal @default(0) @db.Decimal(15, 3) // Stok di cabang
+
+  branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, materialId])
+  @@map("branch_material_stocks")
+}
+
+// Distribusi Gudang Pusat ke Cabang
+model MaterialDistribution {
+  id                String             @id @default(uuid())
+  sourceWarehouseId String             @map("source_warehouse_id")
+  destBranchId      String             @map("dest_branch_id")
+  createdById       String             @map("created_by_id")
+  status            DistributionStatus @default(DRAFT)
+  notes             String?
+  createdAt         DateTime           @default(now()) @map("created_at")
+  dispatchedAt      DateTime?          @map("dispatched_at")
+  receivedAt        DateTime?          @map("received_at")
+
+  sourceWarehouse Warehouse                  @relation("SourceWarehouse", fields: [sourceWarehouseId], references: [id])
+  destBranch      Branch                     @relation("DestinationBranch", fields: [destBranchId], references: [id])
+  createdBy       User                       @relation(fields: [createdById], references: [id])
+  items           MaterialDistributionItem[]
+
+  @@map("material_distributions")
+}
+
+model MaterialDistributionItem {
+  id             String  @id @default(uuid())
+  distributionId String  @map("distribution_id")
+  materialId     String  @map("material_id")
+  quantity       Decimal @db.Decimal(15, 3)
+
+  distribution MaterialDistribution @relation(fields: [distributionId], references: [id], onDelete: Cascade)
+  material     Material             @relation(fields: [materialId], references: [id])
+
+  @@map("material_distribution_items")
+}
+
+// ==========================================
+// 5. PRODUK & RESEP (BOM) (Req 3)
+// ==========================================
 
 model Category {
-  id        Int       @id @default(autoincrement())
-  name      String
-  isGlobal  Boolean   @default(false) @map("is_global")
-  isActive  Boolean   @default(true) @map("is_active")
-  createdAt DateTime  @default(now()) @map("created_at")
-  deletedAt DateTime? @map("deleted_at")
+  id       Int     @id @default(autoincrement())
+  tenantId String  @map("tenant_id")
+  name     String
+  isActive Boolean @default(true) @map("is_active")
 
-  branches Branch[]  @relation("CategoryAvailability")
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   products Product[]
 
   @@map("categories")
 }
 
 model Product {
-  id Int @id @default(autoincrement())
+  id         Int     @id @default(autoincrement())
+  tenantId   String  @map("tenant_id")
+  branchId   String? @map("branch_id") // Null jika produk global untuk semua cabang
+  categoryId Int     @map("category_id")
+  name       String
 
-  // [FIXED] Tipe data diubah ke String agar cocok dengan Branch.id (UUID)
-  branchId String
-  branch   Branch @relation(fields: [branchId], references: [id])
-
-  categoryId Int
-  category   Category @relation(fields: [categoryId], references: [id])
-
-  name        String
-  description String?
-  image       String?
-  hasVariants Boolean          @default(false)
-  variants    ProductVariant[]
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-
-  deletedAt DateTime? @map("deleted_at")
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch?          @relation(fields: [branchId], references: [id])
+  category Category         @relation(fields: [categoryId], references: [id])
+  variants ProductVariant[]
 
   @@map("products")
 }
 
 model ProductVariant {
-  id          Int      @id @default(autoincrement())
-  productId   Int
-  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  name        String
-  price       Decimal  @db.Decimal(10, 2)
-  hpp         Decimal  @default(0) @db.Decimal(15, 2)
-  sku         String?
-  manageStock Boolean  @default(true)
-  stock       Int      @default(0)
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        Int     @id @default(autoincrement())
+  productId Int     @map("product_id")
+  name      String
+  price     Decimal @db.Decimal(10, 2)
 
-  // [FIXED] Menambahkan relasi balik (Opposite Relations)
-  stocks           ProductStock[]
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+  recipes    Recipe[] // Relasi ke bahan baku
+
   promotionTargets PromotionTarget[]
-  orderItems       OrderItem[]
 
   @@map("product_variants")
 }
 
-model ProductStock {
-  id       String @id @default(uuid())
-  branchId String @map("branch_id")
+// Resep/BOM: Pengurangan otomatis bahan baku cabang saat varian terjual
+model Recipe {
+  id               String  @id @default(uuid())
+  variantId        Int     @map("variant_id")
+  materialId       String  @map("material_id")
+  quantityRequired Decimal @map("quantity_required") @db.Decimal(15, 3) // cth: 15 Gram kopi
 
-  // [FIXED] Tipe data diubah ke Int agar cocok dengan ProductVariant.id
-  variantId Int @map("variant_id")
+  variant  ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  material Material       @relation(fields: [materialId], references: [id])
 
-  quantity  Int      @default(0)
-  minStock  Int      @default(5) @map("min_stock")
-  price     Decimal? @db.Decimal(15, 2)
-  hpp       Decimal? @db.Decimal(15, 2)
-  updatedAt DateTime @updatedAt
-
-  branch  Branch         @relation(fields: [branchId], references: [id])
-  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
-
-  @@unique([branchId, variantId])
-  @@map("product_stocks")
+  @@unique([variantId, materialId])
+  @@map("recipes")
 }
 
-// --- 3. PROMOSI ---
+// ==========================================
+// 6. TRANSAKSI (POS CORE)
+// ==========================================
+
+model Order {
+  id            String @id @default(uuid())
+  branchId      String @map("branch_id")
+  cashierId     String @map("cashier_id")
+  invoiceNumber String @unique @map("invoice_number")
+
+  subtotal    Decimal @db.Decimal(15, 2)
+  tax         Decimal @default(0) @db.Decimal(15, 2)
+  totalAmount Decimal @db.Decimal(15, 2)
+
+  // Perubahan untuk Payment Method Dinamis dan MDR Fee
+  paymentMethod  String?        @map("payment_method") // Tipe dirubah dari PaymentMethod enum ke String
+  paymentChannel PaymentChannel @default(BASIC) @map("payment_channel") // Menandakan Manual atau Gateway
+  paymentFee     Decimal        @default(0) @map("payment_fee") @db.Decimal(15, 2) // Total biaya MDR yang dibebankan
+
+  paymentStatus PaymentStatus @default(UNPAID) @map("payment_status")
+  status        OrderStatus   @default(PENDING)
+
+  orderType OrderType @default(DINE_IN) @map("order_type")
+
+  // Midtrans Tracking
+  midtransTransactionId String? @map("midtrans_transaction_id")
+
+  memberId String? @map("member_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  branch        Branch         @relation(fields: [branchId], references: [id])
+  cashier       User           @relation(fields: [cashierId], references: [id])
+  items         OrderItem[]
+  refundRequest RefundRequest?
+
+  member            Member?              @relation(fields: [memberId], references: [id])
+  appliedPromotions OrderPromotion[]
+  pointHistories    MemberPointHistory[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String  @map("order_id")
+  variantId Int     @map("variant_id")
+  quantity  Int
+  price     Decimal @db.Decimal(15, 2)
+  subtotal  Decimal @db.Decimal(15, 2)
+
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@map("order_items")
+}
+
+// ==========================================
+// 7. KEUANGAN (Req 4)
+// ==========================================
+
+model CashFlow {
+  id          String       @id @default(uuid())
+  branchId    String       @map("branch_id")
+  amount      Decimal      @db.Decimal(15, 2)
+  type        CashFlowType // Membedakan Pemasukan vs HPP Belanja vs Operasional
+  category    String? // cth: "Beli Biji Kopi", "Bayar Listrik"
+  description String?
+
+  // Referensi ke Order ID (jika pendapatan) atau Distribution ID (jika belanja masuk)
+  referenceId String? @map("reference_id")
+
+  date       DateTime @default(now())
+  recordedBy String   @map("recorded_by")
+
+  branch   Branch @relation(fields: [branchId], references: [id])
+  recorder User   @relation(fields: [recordedBy], references: [id])
+
+  @@index([branchId, type, date])
+  @@map("cash_flows")
+}
+
+model Shift {
+  id        String    @id @default(uuid())
+  branchId  String    @map("branch_id")
+  name      String
+  type      ShiftType @default(MORNING)
+  startTime String    @map("start_time")
+  endTime   String    @map("end_time")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch      Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  assignments EmployeeShift[]
+
+  @@map("shifts")
+}
+
+model EmployeeShift {
+  id      String   @id @default(uuid())
+  userId  String   @map("user_id")
+  shiftId String   @map("shift_id")
+  date    DateTime @db.Date
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shift Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("employee_shifts")
+}
+
+model Attendance {
+  id         String           @id @default(uuid())
+  userId     String           @map("user_id")
+  clockIn    DateTime         @map("clock_in")
+  clockOut   DateTime?        @map("clock_out")
+  date       DateTime         @db.Date
+  shiftStart String           @map("shift_start")
+  shiftEnd   String           @map("shift_end")
+  status     AttendanceStatus @default(PRESENT)
+  photoUrl   String?          @map("photo_url")
+  location   String?
+  notes      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, clockIn])
+  @@map("attendances")
+}
+
+// ==========================================
+// 9. REFUND MANAGEMENT (Fase 4)
+// ==========================================
+
+model RefundRequest {
+  id            String       @id @default(uuid())
+  orderId       String       @unique @map("order_id")
+  requestedById String       @map("requested_by_id")
+  approvedById  String?      @map("approved_by_id")
+  reason        String
+  amount        Decimal      @db.Decimal(15, 2)
+  status        RefundStatus @default(PENDING)
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  order       Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  requestedBy User  @relation("RequestedRefunds", fields: [requestedById], references: [id])
+  approvedBy  User? @relation("ApprovedRefunds", fields: [approvedById], references: [id])
+
+  @@map("refund_requests")
+}
+
 model Promotion {
   id          String        @id @default(uuid())
-  branchId    String?       @map("branch_id")
   name        String
   code        String        @unique
   type        PromotionType @default(TRANSACTION)
@@ -340,11 +658,8 @@ model Promotion {
 model PromotionTarget {
   id          String @id @default(uuid())
   promotionId String @map("promotion_id")
-
-  // [FIXED] Tipe data diubah ke Int agar cocok dengan ProductVariant.id
-  variantId Int @map("variant_id")
-
-  quantity Int @default(1)
+  variantId   Int    @map("variant_id")
+  quantity    Int    @default(1)
 
   promotion Promotion      @relation(fields: [promotionId], references: [id], onDelete: Cascade)
   variant   ProductVariant @relation(fields: [variantId], references: [id])
@@ -352,95 +667,10 @@ model PromotionTarget {
   @@map("promotion_targets")
 }
 
-
-model RefundRequest {
-  id           String   @id @default(uuid())
-  orderId      String   @unique @map("order_id")
-  requestedById String   @map("requested_by_id")
-  approvedById  String?  @map("approved_by_id")
-  reason       String
-  amount       Decimal  @db.Decimal(15, 2)
-  status       RefundStatus @default(PENDING)
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-
-  order        Order    @relation(fields: [orderId], references: [id])
-  requestedBy  User     @relation("RequestedRefunds", fields: [requestedById], references: [id])
-  approvedBy   User?    @relation("ApprovedRefunds", fields: [approvedById], references: [id])
-
-  @@map("refund_requests")
-}
-
-// --- 4. TRANSAKSI (POS CORE) ---
-model Order {
-  id            String         @id @default(uuid())
-  branchId      String         @map("branch_id")
-  cashierId     String         @map("cashier_id")
-  memberId      String?        @map("member_id")
-  invoiceNumber String         @unique @map("invoice_number")
-  subtotal      Decimal        @db.Decimal(15, 2)
-  tax           Decimal        @default(0) @db.Decimal(15, 2)
-  serviceCharge Decimal        @default(0) @map("service_charge") @db.Decimal(15, 2)
-  discount      Decimal        @default(0) @db.Decimal(15, 2)
-  totalAmount   Decimal        @db.Decimal(15, 2)
-  paymentMethod PaymentMethod? @map("payment_method")
-  paymentStatus PaymentStatus  @default(UNPAID) @map("payment_status")
-  status        OrderStatus    @default(PENDING)
-  notes         String?
-
-  orderType    OrderType @default(DINE_IN)
-  platformName String? // Untuk menyimpan "Gofood", "Grabfood", dll
-  customerName String? // Nama untuk Open Ticket
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  branch  Branch      @relation(fields: [branchId], references: [id])
-  cashier User        @relation("CashierOrders", fields: [cashierId], references: [id])
-  member  Member?     @relation(fields: [memberId], references: [id])
-  items   OrderItem[]
-
-  appliedPromotions OrderPromotion[]
-
-  refundRequest RefundRequest?
-
-  pointHistories MemberPointHistory[]
-
-  @@index([branchId])
-  @@index([createdAt])
-  @@index([status])
-  @@index([paymentStatus])
-  @@map("orders")
-}
-
-model OrderItem {
-  id      String @id @default(uuid())
-  orderId String @map("order_id")
-
-  // [FIXED] Tipe data diubah ke Int agar cocok dengan ProductVariant.id
-  variantId Int @map("variant_id")
-
-  quantity Int
-  price    Decimal @db.Decimal(15, 2)
-  hpp      Decimal @default(0) @db.Decimal(15, 2)
-  discount Decimal @default(0) @db.Decimal(15, 2)
-  subtotal Decimal @db.Decimal(15, 2)
-  notes    String? @map("notes")
-
-  isReady   Boolean @default(false) @map("is_ready")
-  
-  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  variant ProductVariant @relation(fields: [variantId], references: [id])
-
-  @@map("order_items")
-}
-
 model OrderPromotion {
-  id          String @id @default(uuid())
-  orderId     String @map("order_id")
-  promotionId String @map("promotion_id")
-
-  // Mencatat nominal diskon yang disumbangkan oleh promo ini khusus untuk order ini
+  id             String  @id @default(uuid())
+  orderId        String  @map("order_id")
+  promotionId    String  @map("promotion_id")
   discountAmount Decimal @map("discount_amount") @db.Decimal(15, 2)
 
   order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -449,129 +679,39 @@ model OrderPromotion {
   @@map("order_promotions")
 }
 
-// --- 5. INVENTARIS (BAHAN BAKU) ---
-model InventoryItem {
-  id       String           @id @default(uuid())
-  name     String
-  unit     String
-  minStock Int              @default(5) @map("min_stock")
-  stocks   InventoryStock[]
-
-  @@map("inventory_items")
-}
-
-model InventoryStock {
+// ==========================================
+// 11. CRM & MEMBER (Fase 5)
+// ==========================================
+model Member {
   id       String  @id @default(uuid())
   branchId String  @map("branch_id")
-  itemId   String  @map("item_id")
-  quantity Decimal @db.Decimal(10, 2)
-
-  branch Branch        @relation(fields: [branchId], references: [id])
-  item   InventoryItem @relation(fields: [itemId], references: [id])
-
-  @@unique([branchId, itemId])
-  @@map("inventory_stocks")
-}
-
-// --- 6. CRM (MEMBER) ---
-model Member {
-  id     String  @id @default(uuid())
-  name   String
-  phone  String  @unique
-  email  String?
-  points Int     @default(0)
-
-  branchId String @map("branch_id")
-  branch   Branch @relation(fields: [branchId], references: [id])
+  name     String
+  phone    String  @unique
+  email    String?
+  points   Int     @default(0)
 
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
-  orders    Order[]
+
+  branch         Branch               @relation(fields: [branchId], references: [id])
+  orders         Order[]
   pointHistories MemberPointHistory[]
 
   @@index([phone])
   @@map("members")
 }
 
-// Riwayat Poin untuk Audit
 model MemberPointHistory {
-  id        String    @id @default(uuid())
-  memberId  String    @map("member_id")
-  orderId   String?   @map("order_id")
-  type      PointType
-  amount    Int       // Jumlah poin yang masuk/keluar
+  id          String    @id @default(uuid())
+  memberId    String    @map("member_id")
+  orderId     String?   @map("order_id")
+  type        PointType
+  amount      Int
   description String?
-  createdAt DateTime  @default(now()) @map("created_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
 
-  member    Member    @relation(fields: [memberId], references: [id])
-  order     Order?    @relation(fields: [orderId], references: [id])
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  order  Order? @relation(fields: [orderId], references: [id])
 
   @@map("member_point_histories")
-}
-
-// --- 7. HR & SHIFT ---
-model Shift {
-  id        String    @id @default(uuid())
-  branchId  String    @map("branch_id")
-  name      String // Contoh: "Shift Pagi"
-  type      ShiftType @default(MORNING)
-  startTime String    @map("start_time") // Format "HH:mm"
-  endTime   String    @map("end_time") // Format "HH:mm"
-
-  branch      Branch          @relation(fields: [branchId], references: [id])
-  assignments EmployeeShift[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("shifts")
-}
-
-model EmployeeShift {
-  id      String   @id @default(uuid())
-  userId  String   @map("user_id")
-  shiftId String   @map("shift_id")
-  date    DateTime @db.Date // Hanya tanggal (tanpa jam)
-
-  user  User  @relation(fields: [userId], references: [id])
-  shift Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-
-  // CONSTRAINT: Satu user hanya boleh punya 1 jadwal di tanggal yang sama
-  @@unique([userId, date])
-  @@map("employee_shifts")
-}
-
-model Attendance {
-  id       String           @id @default(uuid())
-  userId   String           @map("user_id")
-  clockIn  DateTime         @map("clock_in")
-  clockOut DateTime?        @map("clock_out")
-  status   AttendanceStatus @default(PRESENT)
-  photoUrl String?          @map("photo_url")
-  location String? // Lat,Long atau Nama Tempat
-  notes    String?
-
-  user User @relation(fields: [userId], references: [id])
-
-  @@index([userId, clockIn])
-  @@map("attendances")
-}
-
-// --- 8. KEUANGAN ---
-model CashFlow {
-  id          String       @id @default(uuid())
-  branchId    String       @map("branch_id")
-  amount      Decimal      @db.Decimal(15, 2)
-  type        CashFlowType
-  category    String?
-  description String?
-  receiptUrl  String?      @map("receipt_url")
-  date        DateTime     @default(now())
-  recordedBy  String       @map("recorded_by")
-
-  branch   Branch @relation(fields: [branchId], references: [id])
-  recorder User   @relation("CashFlowRecorder", fields: [recordedBy], references: [id])
-
-  @@index([branchId, date])
-  @@map("cash_flows")
 }

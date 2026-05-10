@@ -1,14 +1,18 @@
 {
   "compilerOptions": {
-    "sourceMap": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "outDir": "./dist",
-    "strict": false,            
-    "lib": ["esnext"],
+    "rootDir": "src",
     "esModuleInterop": true,
-    "target": "es2019",
-    "moduleResolution": "node",
     "skipLibCheck": true,
-    "types": ["node"]
+    "strict": false,
+    "ignoreDeprecations": "6.0",
+    "typeRoots": ["./node_modules/@types", "./src/types"] 
   },
-  "include": ["src/**/*", "prisma/**/*", "src/types/**/*.d.ts"]
+  "ts-node": {
+    "files": true
+  },
+  "include": ["src/**/*"]
 }

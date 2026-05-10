@@ -1,160 +1,273 @@
-import { PrismaClient, Role, ShiftType, PromotionType } from '@prisma/client';
-import * as bcrypt from 'bcryptjs';
+import {
+  PrismaClient,
+  JobPosition,
+  DocumentFormat,
+  PaymentChannel,
+} from "@prisma/client";
+import * as bcrypt from "bcrypt";
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Starting Seeding Process...');
+  console.log("🌱 Memulai proses seeding...");
 
-  // --- 1. CLEANUP ---
-  // Urutan delete penting karena foreign key constraints
-  await prisma.receiptSetting.deleteMany(); // [BARU] Bersihkan setting struk
-  await prisma.orderItem.deleteMany();
-  await prisma.orderPromotion.deleteMany();
-  await prisma.order.deleteMany();
-  await prisma.employeeShift.deleteMany();
-  await prisma.shift.deleteMany();
-  await prisma.productStock.deleteMany();
-  await prisma.inventoryStock.deleteMany();
-  await prisma.promotionTarget.deleteMany();
-  await prisma.promotion.deleteMany();
-  await prisma.productVariant.deleteMany();
-  await prisma.product.deleteMany();
-  await prisma.category.deleteMany();
-  await prisma.inventoryItem.deleteMany();
-  await prisma.cashFlow.deleteMany();
-  await prisma.attendance.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.branch.deleteMany();
-  await prisma.generalSetting.deleteMany();
+  // 1. Hapus data lama (Opsional, hati-hati jika di production)
+  // Karena relasi Tenant menggunakan onDelete: Cascade, menghapus tenant akan menghapus hampir semua data terkait.
+  await prisma.tenant.deleteMany();
+  await prisma.permission.deleteMany();
 
-  console.log('🧹 Database cleaned.');
+  // 2. Buat Data Tenant Awal
+  const tenant = await prisma.tenant.create({
+    data: {
+      name: "EPS Kopi Nusantara",
+      email: "admin@gmail.com",
+      phone: "081234567890",
+      activeFeatures: ["INVENTORY", "QUEUE", "PAYMENT_GATEWAY"],
+    },
+  });
+  console.log(`✅ Tenant dibuat: ${tenant.name}`);
 
-  // --- 2. GENERAL SETTINGS ---
-  console.log('⚙️  Seeding General Settings...');
+  // 3. Setup Permissions (Hak Akses Master)
+  const permissionsData = [
+    // Modul Order
+    {
+      module: "ORDER",
+      action: "CREATE",
+      code: "ORDER_CREATE",
+      description: "Membuat pesanan baru",
+    },
+    {
+      module: "ORDER",
+      action: "READ",
+      code: "ORDER_READ",
+      description: "Melihat riwayat pesanan",
+    },
+    // Modul Inventory
+    {
+      module: "INVENTORY",
+      action: "CREATE",
+      code: "INVENTORY_CREATE",
+      description: "Menambah bahan baku & stok",
+    },
+    {
+      module: "INVENTORY",
+      action: "READ",
+      code: "INVENTORY_READ",
+      description: "Melihat stok gudang dan cabang",
+    },
+    // Modul Finance
+    {
+      module: "FINANCE",
+      action: "READ",
+      code: "FINANCE_READ",
+      description: "Melihat laporan keuangan dan cashflow",
+    },
+    // Modul Settings
+    {
+      module: "SETTINGS",
+      action: "UPDATE",
+      code: "SETTINGS_UPDATE",
+      description: "Mengubah pengaturan sistem",
+    },
+  ];
+
+  await prisma.permission.createMany({ data: permissionsData });
+  const allPermissions = await prisma.permission.findMany();
+  console.log("✅ Permissions master dibuat");
+
+  // 4. Setup Role (OWNER) dan Assign semua Permissions
+  const roleOwner = await prisma.role.create({
+    data: {
+      tenantId: tenant.id,
+      name: "Owner",
+      description: "Akses penuh ke seluruh sistem",
+    },
+  });
+
+  const rolePermissionsData = allPermissions.map((perm) => ({
+    roleId: roleOwner.id,
+    permissionId: perm.id,
+  }));
+  await prisma.rolePermission.createMany({ data: rolePermissionsData });
+  console.log(`✅ Role dibuat: ${roleOwner.name}`);
+
+  // 5. Setup Pengaturan Umum (General Setting)
   await prisma.generalSetting.create({
     data: {
-      appName: 'EPS POS',
-      storeName: 'EPISODE KOPI',
-      tagline: 'Smart Business System',
-      taxRate: 11.0,
-      serviceChargeRate: 5.0,
-      currencySymbol: 'Rp',
-      themePrimaryColor: '#4F46E5',
-      themeSecondaryColor: '#0F172A',
-      themeBackgroundColor: '#F3F4F6',
-      address: 'Jl. Ks. Tubun No.22, Kejaksan, Cirebon',
-      phone: '085174464404',
-      email: 'admin@episodekopi.com',
-      website: 'www.episodekopi.com',
+      tenantId: tenant.id,
+      appName: "EPS POS",
+      storeName: "EPS Kopi Nusantara",
+      taxRate: 11.0, // Pajak 11%
+      serviceChargeRate: 5.0, // Service Charge 5%
+      currencySymbol: "Rp",
+    },
+  });
 
-      pointsPerAmount: 10000,
-      pointsEarned: 1,
-      pointValue: 1,
-      minOrderToEarn: 0,
-      maxRedeemPercent: 50,
+  // 6. Setup Gudang (Warehouse) dan Cabang (Branch)
+  const warehouse = await prisma.warehouse.create({
+    data: {
+      tenantId: tenant.id,
+      name: "Gudang Utama Pusat",
+      address: "Jl. Gudang Kopi No. 1, Bandung",
+    },
+  });
+
+  const branch = await prisma.branch.create({
+    data: {
+      tenantId: tenant.id,
+      name: "Cabang Utama Dago",
+      address: "Jl. Ir. H. Juanda No. 99, Bandung",
+      phone: "022-1234567",
+      enableOrderQueue: true,
+    },
+  });
+  console.log(`✅ Gudang dan Cabang dibuat`);
+
+  // 7. Setup Pengaturan Struk & Payment untuk Cabang
+  await prisma.receiptSetting.create({
+    data: {
+      branchId: branch.id,
+      documentFormat: DocumentFormat.RECEIPT,
+      storeName: "EPS KOPI DAGO",
+      footerMessage: "Terima kasih atas kunjungan Anda!",
+    },
+  });
+
+  await prisma.paymentIntegration.create({
+    data: {
+      branchId: branch.id,
+      channelType: PaymentChannel.BASIC, // Default basic, ubah ke GATEWAY jika API key midtrans sudah ada
+      isProduction: false,
+    },
+  });
+
+  // 8. Buat User Admin (Owner)
+  const hashedPassword = await bcrypt.hash("password123", 10);
+  const user = await prisma.user.create({
+    data: {
+      tenantId: tenant.id,
+      branchId: branch.id,
+      roleId: roleOwner.id,
+      email: "owner@gmail.com",
+      passwordHash: hashedPassword,
+      fullName: "Owner",
+      jobPosition: JobPosition.OWNER,
       isActive: true,
     },
   });
+  console.log(`✅ User dibuat: ${user.email} (Password: password123)`);
 
-  // --- 3. CREATE BRANCHES & RECEIPT SETTINGS ---
-  console.log('🏢 Seeding Branches & Receipt Settings...');
-  
-  // Cabang Pusat
-  const branchPusat = await prisma.branch.create({
+  // 9. Setup Inventory Master (Bahan Baku)
+  const materialKopi = await prisma.material.create({
     data: {
-      name: 'Episode Kopi - Pusat',
-      address: 'Jl. Ks. Tubun No.22, Kejaksan, Kec. Kejaksan, Kota Cirebon, Jawa Barat 45121',
-      phone: '085174464404',
+      tenantId: tenant.id,
+      name: "Biji Kopi Arabica",
+      unit: "Gram",
+      costPerUnit: 200, // Rp 200 per gram
     },
   });
 
-  // Cabang Arjawinangun
-  const branchCabang = await prisma.branch.create({
+  const materialSusu = await prisma.material.create({
     data: {
-      name: 'Episode Kopi - Arjawinangun',
-      address: 'Jl. Sutan Syahrir, Arjawinangun, Kec. Arjawinangun, Kabupaten Cirebon, Jawa Barat 45162',
-      phone: '089603205121',
+      tenantId: tenant.id,
+      name: "Susu UHT Full Cream",
+      unit: "Mililiter",
+      costPerUnit: 20, // Rp 20 per ml
     },
   });
 
-  // [BARU] SEEDER DEFAULT RECEIPT SETTINGS PER CABANG
-  const branchIds = [branchPusat.id, branchCabang.id];
-
-  for (const bId of branchIds) {
-    const targetBranch = bId === branchPusat.id ? branchPusat : branchCabang;
-    
-    await prisma.receiptSetting.create({
-      data: {
-        branchId: bId,
-        storeName: targetBranch.name.toUpperCase(),
-        headerAddress: targetBranch.address,
-        headerPhone: targetBranch.phone,
-        headerTaxId: "01.234.567.8-901.000", // Contoh NPWP Default
-        footerMessage: "Terima kasih atas kunjungan Anda!\nKritik & Saran: @episodekopi",
-        showLogo: true,
-        showCashierName: true,
-        showCustomerName: true,
-        showOrderType: true,
-        showTableNumber: true,
-        showVariantName: true,
-        showItemDiscount: true,
-        showPointsEarned: true,
-        showBarcode: true,
-        paperWidth: 58, // Standar printer thermal kecil
-        fontSize: 'MEDIUM',
-      }
-    });
-  }
-  console.log('📄 Default Receipt Settings created for each branch.');
-
-  // --- 4. CREATE USERS ---
-  console.log('👥 Seeding Users...');
-  const passwordHash = await bcrypt.hash('password123', 10);
-  const pinHash = await bcrypt.hash('123456', 10);
-
-  await prisma.user.create({
+  const materialCup = await prisma.material.create({
     data: {
-      email: 'owner@episode.com',
-      fullName: 'Owner Episode',
-      passwordHash,
-      pinHash,
-      role: Role.OWNER,
-      branchId: branchPusat.id,
+      tenantId: tenant.id,
+      name: "Gelas Cup Plastik 16oz",
+      unit: "Pcs",
+      costPerUnit: 1500, // Rp 1500 per cup
+    },
+  });
+  console.log("✅ Master Bahan Baku (Materials) dibuat");
+
+  // Inject Stok Awal ke Gudang Pusat
+  await prisma.warehouseStock.createMany({
+    data: [
+      {
+        warehouseId: warehouse.id,
+        materialId: materialKopi.id,
+        quantity: 10000,
+      }, // 10 Kg Kopi
+      {
+        warehouseId: warehouse.id,
+        materialId: materialSusu.id,
+        quantity: 20000,
+      }, // 20 Liter Susu
+      { warehouseId: warehouse.id, materialId: materialCup.id, quantity: 1000 }, // 1000 Cup
+    ],
+  });
+
+  // Inject Stok Awal ke Cabang Dago (Simulasi sudah didistribusikan)
+  await prisma.branchMaterialStock.createMany({
+    data: [
+      { branchId: branch.id, materialId: materialKopi.id, quantity: 2000 }, // 2 Kg Kopi di cabang
+      { branchId: branch.id, materialId: materialSusu.id, quantity: 5000 }, // 5 Liter Susu di cabang
+      { branchId: branch.id, materialId: materialCup.id, quantity: 200 }, // 200 Cup di cabang
+    ],
+  });
+  console.log("✅ Stok Awal Gudang & Cabang disiapkan");
+
+  // 10. Setup Kategori & Produk
+  const categoryCoffee = await prisma.category.create({
+    data: {
+      tenantId: tenant.id,
+      name: "Kopi Susu",
     },
   });
 
-  await prisma.user.create({
+  const productKopiSusu = await prisma.product.create({
     data: {
-      email: 'manager.pusat@episode.com',
-      fullName: 'Manager Pusat',
-      passwordHash,
-      pinHash,
-      role: Role.MANAGER,
-      branchId: branchPusat.id,
+      tenantId: tenant.id,
+      categoryId: categoryCoffee.id,
+      name: "Kopi Susu Gula Aren",
+      // Jika branchId null, artinya produk ini global (tersedia di semua cabang tenant tersebut)
     },
   });
 
-  // --- 5. SHIFTS ---
-  console.log('⏰ Seeding Shifts...');
-  const shiftsData = [
-    { name: 'Shift Pagi', startTime: '07:00', endTime: '15:00', type: ShiftType.MORNING },
-    { name: 'Shift Siang', startTime: '12:00', endTime: '20:00', type: ShiftType.NOON },
-    { name: 'Shift Malam', startTime: '15:00', endTime: '23:00', type: ShiftType.NIGHT },
-  ];
+  // Buat Varian (Reguler & Large)
+  const variantReguler = await prisma.productVariant.create({
+    data: {
+      productId: productKopiSusu.id,
+      name: "Reguler (16oz)",
+      price: 25000,
+    },
+  });
 
-  for (const s of shiftsData) {
-    await prisma.shift.create({ data: { ...s, branchId: branchPusat.id } });
-    await prisma.shift.create({ data: { ...s, branchId: branchCabang.id } });
-  }
+  // 11. Setup Resep (BOM - Pengurangan Otomatis)
+  // Untuk 1 Gelas Kopi Susu Aren Reguler membutuhkan: 18g Kopi, 150ml Susu, 1 Cup
+  await prisma.recipe.createMany({
+    data: [
+      {
+        variantId: variantReguler.id,
+        materialId: materialKopi.id,
+        quantityRequired: 18,
+      },
+      {
+        variantId: variantReguler.id,
+        materialId: materialSusu.id,
+        quantityRequired: 150,
+      },
+      {
+        variantId: variantReguler.id,
+        materialId: materialCup.id,
+        quantityRequired: 1,
+      },
+    ],
+  });
+  console.log("✅ Produk, Varian, dan Resep (BOM) berhasil dikonfigurasi");
 
-  console.log('✅ Seeding completed successfully!');
+  console.log("🎉 Seeding Selesai!");
 }
 
 main()
   .catch((e) => {
-    console.error(e);
-    process.exit(1);
+    console.error("❌ Gagal melakukan seeding:", e);
   })
   .finally(async () => {
     await prisma.$disconnect();

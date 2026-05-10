@@ -1,14 +1,13 @@
-import { Router } from 'express';
-import { login, unlockSession, getMe } from '../controllers/auth.controller';
-import { authenticate } from '../middlewares/auth.middleware';
+// src/routes/auth.routes.ts
+import { Router } from "express";
+import { login, getMe, registerTenant } from "../controllers/auth.controller";
+import { verifyToken } from "../middlewares/auth.middleware";
 
 const router = Router();
 
-// Public Routes
-router.post('/login', login);
-router.post('/unlock', unlockSession); // Masuk pakai PIN
+router.post("/login", login);
+router.post("/register", registerTenant);
 
-// Protected Routes (Harus ada Token)
-router.get('/me', authenticate, getMe); 
+router.get("/me", verifyToken, getMe);
 
 export default router;

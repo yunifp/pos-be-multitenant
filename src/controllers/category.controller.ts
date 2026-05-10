@@ -1,97 +1,199 @@
-import { Request, Response } from 'express';
-import { PrismaClient, Role } from '@prisma/client';
+// src/controllers/category.controller.ts
+import { Request, Response } from "express";
+import prisma from "../config/prisma";
 
-const prisma = new PrismaClient();
-
-// --- CREATE CATEGORY ---
-export const createCategory = async (req: Request, res: Response) => {
+// [GET] Ambil semua kategori
+export const getCategories = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
-    const user = (req as any).user;
-    const { name, targetBranchIds } = req.body;
-
-    let branchesToConnect: { id: string }[] = [];
-
-    if (user.role === Role.OWNER) {
-      if (!targetBranchIds || targetBranchIds.length === 0) {
-        return res.status(400).json({ message: "Pilih minimal satu cabang" });
-      }
-      branchesToConnect = targetBranchIds.map((id: string) => ({ id }));
-    } else {
-      // Manager otomatis ke cabangnya sendiri
-      branchesToConnect = [{ id: user.branchId }];
-    }
-
-    await prisma.category.create({
-      data: {
-        name,
-        branches: { connect: branchesToConnect }
-      }
-    });
-
-    return res.status(201).json({ message: "Kategori berhasil dibuat" });
-  } catch (error) {
-    return res.status(500).json({ message: "Gagal membuat kategori" });
-  }
-};
-
-// --- GET CATEGORIES (Filter by Branch) ---
-export const getCategories = async (req: Request, res: Response) => {
-  try {
-    const user = (req as any).user;
-    const { branchId } = req.query;
-
-    let whereClause: any = { deletedAt: null, isActive: true };
-
-    if (user.role === Role.OWNER) {
-        if (branchId) {
-            // If branchId is provided (e.g., clicked a tab), filter by it.
-            whereClause.branches = { some: { id: branchId as string } };
-        } 
-        // [FIX] If NO branchId is provided, return ALL categories.
-        // This allows the Product Form Modal to populate the dropdown.
-    } else {
-        // Managers only see their branch categories
-        whereClause.branches = { some: { id: user.branchId } };
-    }
-
+    const tenantId = req.user!.tenantId;
     const categories = await prisma.category.findMany({
-      where: whereClause,
-      orderBy: { name: 'asc' },
-      include: { _count: { select: { products: true } } } 
+      where: { tenantId },
+      orderBy: { id: "desc" },
     });
 
-    return res.json(categories);
+    res
+      .status(200)
+      .json({
+        success: true,
+        data: categories,
+        message: "Daftar kategori berhasil diambil",
+      });
   } catch (error) {
-    return res.status(500).json({ message: "Failed to fetch categories" });
+    res
+      .status(500)
+      .json({ success: false, message: "Terjadi kesalahan server", error });
   }
 };
-// --- UPDATE CATEGORY (NEW) ---
-export const updateCategory = async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params;
-        const { name } = req.body;
 
-        await prisma.category.update({
-            where: { id: parseInt(id) },
-            data: { name }
-        });
+// [GET] Ambil detail 1 kategori
+export const getCategoryById = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const categoryId = parseInt(req.params.id);
 
-        return res.json({ message: "Kategori berhasil diperbarui" });
-    } catch (error) {
-        return res.status(500).json({ message: "Gagal update kategori" });
+    if (isNaN(categoryId)) {
+      res
+        .status(400)
+        .json({ success: false, message: "ID Kategori tidak valid" });
+      return;
     }
+
+    // Gunakan findFirst untuk memastikan kategori ini milik tenant yang sedang login
+    const category = await prisma.category.findFirst({
+      where: { id: categoryId, tenantId },
+    });
+
+    if (!category) {
+      res
+        .status(404)
+        .json({ success: false, message: "Kategori tidak ditemukan" });
+      return;
+    }
+
+    res
+      .status(200)
+      .json({
+        success: true,
+        data: category,
+        message: "Detail kategori berhasil diambil",
+      });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ success: false, message: "Terjadi kesalahan server", error });
+  }
 };
 
-// --- DELETE CATEGORY ---
-export const deleteCategory = async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params;
-        await prisma.category.update({
-            where: { id: parseInt(id) },
-            data: { deletedAt: new Date() } // Soft Delete
-        });
-        return res.json({ message: "Kategori dihapus" });
-    } catch (error) {
-        return res.status(500).json({ message: "Gagal hapus kategori" });
+// [POST] Tambah kategori baru
+export const createCategory = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const category = await prisma.category.create({
+      data: { tenantId, ...req.body },
+    });
+
+    res
+      .status(201)
+      .json({
+        success: true,
+        data: category,
+        message: "Kategori berhasil ditambahkan",
+      });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ success: false, message: "Terjadi kesalahan server", error });
+  }
+};
+
+// [PUT] Update kategori
+export const updateCategory = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const categoryId = parseInt(req.params.id);
+
+    if (isNaN(categoryId)) {
+      res
+        .status(400)
+        .json({ success: false, message: "ID Kategori tidak valid" });
+      return;
     }
+
+    // Cek apakah kategori ada dan milik tenant ini
+    const existingCategory = await prisma.category.findFirst({
+      where: { id: categoryId, tenantId },
+    });
+
+    if (!existingCategory) {
+      res
+        .status(404)
+        .json({ success: false, message: "Kategori tidak ditemukan" });
+      return;
+    }
+
+    // Lakukan update
+    const updatedCategory = await prisma.category.update({
+      where: { id: categoryId },
+      data: req.body,
+    });
+
+    res
+      .status(200)
+      .json({
+        success: true,
+        data: updatedCategory,
+        message: "Kategori berhasil diperbarui",
+      });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ success: false, message: "Terjadi kesalahan server", error });
+  }
+};
+
+// [DELETE] Hapus kategori
+export const deleteCategory = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const categoryId = parseInt(req.params.id);
+
+    if (isNaN(categoryId)) {
+      res
+        .status(400)
+        .json({ success: false, message: "ID Kategori tidak valid" });
+      return;
+    }
+
+    // Cek apakah kategori ada dan milik tenant ini
+    const existingCategory = await prisma.category.findFirst({
+      where: { id: categoryId, tenantId },
+    });
+
+    if (!existingCategory) {
+      res
+        .status(404)
+        .json({ success: false, message: "Kategori tidak ditemukan" });
+      return;
+    }
+
+    // Lakukan penghapusan
+    await prisma.category.delete({
+      where: { id: categoryId },
+    });
+
+    res
+      .status(200)
+      .json({ success: true, message: "Kategori berhasil dihapus" });
+  } catch (error) {
+    // Tangani error khusus Prisma jika kategori masih dipakai di produk (Foreign Key Constraint)
+    if (
+      error instanceof Error &&
+      error.message.includes("Foreign key constraint failed")
+    ) {
+      res.status(400).json({
+        success: false,
+        message:
+          "Kategori tidak dapat dihapus karena masih digunakan pada produk",
+      });
+      return;
+    }
+    res
+      .status(500)
+      .json({ success: false, message: "Terjadi kesalahan server", error });
+  }
 };

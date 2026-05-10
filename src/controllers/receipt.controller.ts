@@ -1,43 +1,44 @@
 // src/controllers/receipt.controller.ts
-import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Request, Response } from "express";
+import prisma from "../config/prisma";
 
-const prisma = new PrismaClient();
+export const getReceiptSetting = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const branchId = req.params.branchId;
+    const setting = await prisma.receiptSetting.findUnique({
+      where: { branchId },
+    });
+    res.status(200).json({ success: true, data: setting });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ success: false, message: "Terjadi kesalahan server" });
+  }
+};
 
-export const receiptController = {
-    // Ambil setting struk berdasarkan branchId
-    getSetting: async (req: Request, res: Response) => {
-        try {
-            const { branchId } = req.params;
-            let setting = await prisma.receiptSetting.findUnique({
-                where: { branchId }
-            });
-
-            // Jika belum ada, buatkan default (fallback)
-            if (!setting) {
-                setting = await prisma.receiptSetting.create({
-                    data: { branchId, storeName: 'EPS POS STORE' }
-                });
-            }
-            res.json(setting);
-        } catch (error: any) {
-            res.status(500).json({ message: error.message });
-        }
-    },
-
-    // Update setting struk
-    updateSetting: async (req: Request, res: Response) => {
-        try {
-            const { branchId } = req.params;
-            const data = req.body;
-
-            const updated = await prisma.receiptSetting.update({
-                where: { branchId },
-                data: data
-            });
-            res.json(updated);
-        } catch (error: any) {
-            res.status(400).json({ message: "Gagal memperbarui pengaturan struk" });
-        }
-    }
+export const updateReceiptSetting = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const branchId = req.params.branchId;
+    const updated = await prisma.receiptSetting.update({
+      where: { branchId },
+      data: req.body,
+    });
+    res
+      .status(200)
+      .json({
+        success: true,
+        data: updated,
+        message: "Pengaturan struk diperbarui",
+      });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ success: false, message: "Terjadi kesalahan server" });
+  }
 };

@@ -1,14 +1,25 @@
-import { Router } from 'express';
-import { getCashFlows, createCashFlow, updateCashFlow, deleteCashFlow } from '../controllers/cashflow.controller';
-import { authenticate, authorizeRole } from '../middlewares/auth.middleware';
+import { Router } from "express";
+import {
+  getCashFlows,
+  createCashFlow,
+} from "../controllers/cashflow.controller";
+import { verifyToken, requirePermission } from "../middlewares/auth.middleware";
+import { validate } from "../middlewares/validate.middleware";
+import { createCashFlowSchema } from "../validations/cashflow.validation";
 
 const router = Router();
 
-router.use(authenticate);
+router.use(verifyToken);
 
-router.get('/', authorizeRole(['OWNER', 'MANAGER']), getCashFlows);
-router.post('/', authorizeRole(['OWNER', 'MANAGER']), createCashFlow);
-router.put('/:id', authorizeRole(['OWNER']), updateCashFlow);
-router.delete('/:id', authorizeRole(['OWNER']), deleteCashFlow);
+// [GET] Lihat Mutasi Kas
+router.get("/", requirePermission("FINANCE_READ"), getCashFlows as any);
+
+// [POST] Catat Pengeluaran/Pemasukan Manual
+router.post(
+  "/",
+  requirePermission("FINANCE_CREATE"),
+  validate(createCashFlowSchema),
+  createCashFlow as any,
+);
 
 export default router;

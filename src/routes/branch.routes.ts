@@ -1,18 +1,39 @@
-import { Router } from 'express';
-import { createBranch, getAllBranches, updateBranch, deleteBranch, getBranchById } from '../controllers/branch.controller';
-import { authenticate, authorizeRole } from '../middlewares/auth.middleware';
+// src/routes/branch.routes.ts
+import { Router } from "express";
+import {
+  getBranches,
+  getBranchById,
+  createBranch,
+  updateBranch,
+  deleteBranch,
+} from "../controllers/branch.controller";
+import { verifyToken, requirePermission } from "../middlewares/auth.middleware";
+import { validate } from "../middlewares/validate.middleware";
+import {
+  createBranchSchema,
+  updateBranchSchema,
+} from "../validations/branch.validation";
 
 const router = Router();
 
-router.use(authenticate);
+// Semua akses ke route cabang mewajibkan token JWT
+router.use(verifyToken);
 
-// Semua role butuh lihat cabang (untuk login/pilih konteks), tapi management hanya Owner
-router.get('/', getAllBranches);
-router.get('/:id', getBranchById);
-
-// Aksi Tulis Khusus Owner
-router.post('/', authorizeRole(['OWNER']), createBranch);
-router.put('/:id', authorizeRole(['OWNER']), updateBranch);
-router.delete('/:id', authorizeRole(['OWNER']), deleteBranch);
+// Daftar Endpoints
+router.get("/", requirePermission("BRANCH_READ"), getBranches as any);
+router.get("/:id", requirePermission("BRANCH_READ"), getBranchById as any);
+router.post(
+  "/",
+  requirePermission("BRANCH_CREATE"),
+  validate(createBranchSchema),
+  createBranch as any,
+);
+router.put(
+  "/:id",
+  requirePermission("BRANCH_UPDATE"),
+  validate(updateBranchSchema),
+  updateBranch as any,
+);
+router.delete("/:id", requirePermission("BRANCH_DELETE"), deleteBranch as any);
 
 export default router;

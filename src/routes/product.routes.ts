@@ -1,21 +1,43 @@
-import { Router } from 'express';
-import { createProduct, getProducts, updateProduct, deleteProduct } from '../controllers/product.controller';
-import { authenticate, authorizeRole } from '../middlewares/auth.middleware';
-import { createUploader } from '../utils/uploader';
+// src/routes/product.routes.ts
+import { Router } from "express";
+import {
+  getProducts,
+  getProductById,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+} from "../controllers/product.controller";
+import { verifyToken, requirePermission } from "../middlewares/auth.middleware";
+import { validate } from "../middlewares/validate.middleware";
+import {
+  createProductSchema,
+  updateProductSchema,
+} from "../validations/product.validation";
 
 const router = Router();
 
-const uploadProduct = createUploader('products');
+// Wajib Login untuk mengakses modul ini
+router.use(verifyToken);
 
-router.use(authenticate);
-
-
-router.get('/', getProducts);
-
-router.post('/', authorizeRole(['OWNER', 'MANAGER']), uploadProduct.single('image'), createProduct);
-
-router.put('/:id', authorizeRole(['OWNER', 'MANAGER']), uploadProduct.single('image'), updateProduct);
-
-router.delete('/:id', authorizeRole(['OWNER', 'MANAGER']), deleteProduct);
+// Daftar Endpoints
+router.get("/", requirePermission("INVENTORY_READ"), getProducts as any);
+router.get("/:id", requirePermission("INVENTORY_READ"), getProductById as any);
+router.post(
+  "/",
+  requirePermission("INVENTORY_CREATE"),
+  validate(createProductSchema),
+  createProduct as any,
+);
+router.put(
+  "/:id",
+  requirePermission("INVENTORY_UPDATE"),
+  validate(updateProductSchema),
+  updateProduct as any,
+);
+router.delete(
+  "/:id",
+  requirePermission("INVENTORY_DELETE"),
+  deleteProduct as any,
+);
 
 export default router;

@@ -1,20 +1,39 @@
-import { Router } from 'express';
-import { createCategory, getCategories, deleteCategory, updateCategory } from '../controllers/category.controller';
-import { authenticate, authorizeRole } from '../middlewares/auth.middleware';
+// src/routes/category.routes.ts
+import { Router } from "express";
+import {
+  getCategories,
+  getCategoryById,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+} from "../controllers/category.controller";
+import { verifyToken, requirePermission } from "../middlewares/auth.middleware";
+import { validate } from "../middlewares/validate.middleware";
+import {
+  createCategorySchema,
+  updateCategorySchema,
+} from "../validations/category.validation";
 
 const router = Router();
 
-// Semua endpoint butuh login
-router.use(authenticate);
+// Semua route kategori harus terautentikasi
+router.use(verifyToken);
 
-// GET: Semua role bisa lihat kategori (sesuai cabang masing-masing di controller)
-router.get('/', getCategories);
-
-// POST: Hanya Owner & Manager yang bisa buat kategori
-router.post('/', authorizeRole(['OWNER', 'MANAGER']), createCategory);
-router.put('/:id', authorizeRole(['OWNER', 'MANAGER']), updateCategory);
-
-// DELETE: Hanya Owner & Manager yang bisa hapus
-router.delete('/:id', authorizeRole(['OWNER', 'MANAGER']), deleteCategory);
+// Daftar endpoints
+router.get("/", requirePermission("INVENTORY_READ"), getCategories);
+router.get("/:id", requirePermission("INVENTORY_READ"), getCategoryById);
+router.post(
+  "/",
+  requirePermission("INVENTORY_CREATE"),
+  validate(createCategorySchema),
+  createCategory,
+);
+router.put(
+  "/:id",
+  requirePermission("INVENTORY_UPDATE"),
+  validate(updateCategorySchema),
+  updateCategory,
+);
+router.delete("/:id", requirePermission("INVENTORY_DELETE"), deleteCategory);
 
 export default router;
