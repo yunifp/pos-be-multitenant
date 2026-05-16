@@ -1,6 +1,5 @@
 // src/controllers/warehouse.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
 import { DistributionStatus } from "@prisma/client";
 
 export interface AuthRequest extends Request {
@@ -22,8 +21,9 @@ export const getWarehouses = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
-    const warehouses = await prisma.warehouse.findMany({
+    const warehouses = await db.warehouse.findMany({
       where: { tenantId },
       include: {
         _count: { select: { stocks: true } },
@@ -42,10 +42,11 @@ export const getWarehouseById = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const warehouseId = req.params.id;
 
-    const warehouse = await prisma.warehouse.findFirst({
+    const warehouse = await db.warehouse.findFirst({
       where: { id: warehouseId, tenantId },
       include: {
         stocks: {
@@ -74,17 +75,16 @@ export const createWarehouse = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
-    const newWarehouse = await prisma.warehouse.create({
+    const newWarehouse = await db.warehouse.create({
       data: { tenantId, ...req.body },
     });
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: newWarehouse,
-        message: "Gudang berhasil ditambahkan",
-      });
+    res.status(201).json({
+      success: true,
+      data: newWarehouse,
+      message: "Gudang berhasil ditambahkan",
+    });
   } catch (error) {
     res
       .status(500)
@@ -97,10 +97,11 @@ export const updateWarehouse = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const warehouseId = req.params.id;
 
-    const existing = await prisma.warehouse.findFirst({
+    const existing = await db.warehouse.findFirst({
       where: { id: warehouseId, tenantId },
     });
 
@@ -111,7 +112,7 @@ export const updateWarehouse = async (
       return;
     }
 
-    const updated = await prisma.warehouse.update({
+    const updated = await db.warehouse.update({
       where: { id: warehouseId },
       data: req.body,
     });
@@ -131,10 +132,11 @@ export const deleteWarehouse = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const warehouseId = req.params.id;
 
-    const existing = await prisma.warehouse.findFirst({
+    const existing = await db.warehouse.findFirst({
       where: { id: warehouseId, tenantId },
     });
 
@@ -145,16 +147,14 @@ export const deleteWarehouse = async (
       return;
     }
 
-    await prisma.warehouse.delete({ where: { id: warehouseId } });
+    await db.warehouse.delete({ where: { id: warehouseId } });
     res.status(200).json({ success: true, message: "Gudang dihapus" });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Gudang tidak dapat dihapus karena masih menampung data",
-        error,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Gudang tidak dapat dihapus karena masih menampung data",
+      error,
+    });
   }
 };
 
@@ -168,12 +168,13 @@ export const addWarehouseStock = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const warehouseId = req.params.id;
     const { materialId, quantity } = req.body;
 
     // Pastikan gudang tersebut ada dan milik tenant
-    const warehouse = await prisma.warehouse.findFirst({
+    const warehouse = await db.warehouse.findFirst({
       where: { id: warehouseId, tenantId },
     });
 
@@ -185,20 +186,18 @@ export const addWarehouseStock = async (
     }
 
     // Gunakan upsert: Jika stok belum ada maka buat record baru, jika ada maka tambah quantity-nya
-    const stock = await prisma.warehouseStock.upsert({
+    const stock = await db.warehouseStock.upsert({
       where: { warehouseId_materialId: { warehouseId, materialId } },
       update: { quantity: { increment: quantity } },
       create: { warehouseId, materialId, quantity },
       include: { material: { select: { name: true, unit: true } } },
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: stock,
-        message: "Stok gudang berhasil ditambahkan",
-      });
+    res.status(200).json({
+      success: true,
+      data: stock,
+      message: "Stok gudang berhasil ditambahkan",
+    });
   } catch (error) {
     res
       .status(500)
@@ -212,9 +211,10 @@ export const getDistributions = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
 
-    const distributions = await prisma.materialDistribution.findMany({
+    const distributions = await db.materialDistribution.findMany({
       where: {
         sourceWarehouse: { tenantId }, // Hanya ambil distribusi dari gudang milik tenant ini
       },
@@ -243,30 +243,29 @@ export const createDistribution = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const { sourceWarehouseId, destBranchId, notes, items } = req.body;
     const userId = req.user!.id;
     const tenantId = req.user!.tenantId;
 
     // 1. Validasi kepemilikan Gudang dan Cabang
-    const warehouse = await prisma.warehouse.findFirst({
+    const warehouse = await db.warehouse.findFirst({
       where: { id: sourceWarehouseId, tenantId },
     });
-    const branch = await prisma.branch.findFirst({
+    const branch = await db.branch.findFirst({
       where: { id: destBranchId, tenantId },
     });
 
     if (!warehouse || !branch) {
-      res
-        .status(404)
-        .json({
-          success: false,
-          message: "Gudang atau Cabang tidak ditemukan/tidak valid",
-        });
+      res.status(404).json({
+        success: false,
+        message: "Gudang atau Cabang tidak ditemukan/tidak valid",
+      });
       return;
     }
 
     // 2. Transaksi Distribusi
-    const distribution = await prisma.$transaction(async (tx) => {
+    const distribution = await db.$transaction(async (tx) => {
       // Periksa kecukupan stok sebelum mengurangi
       for (const item of items) {
         const stock = await tx.warehouseStock.findUnique({
@@ -318,20 +317,16 @@ export const createDistribution = async (
       return dist;
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: distribution,
-        message: "Distribusi dikirim ke cabang",
-      });
+    res.status(201).json({
+      success: true,
+      data: distribution,
+      message: "Distribusi dikirim ke cabang",
+    });
   } catch (error: any) {
-    res
-      .status(400)
-      .json({
-        success: false,
-        message: error.message || "Gagal memproses distribusi",
-      });
+    res.status(400).json({
+      success: false,
+      message: error.message || "Gagal memproses distribusi",
+    });
   }
 };
 
@@ -341,10 +336,11 @@ export const receiveDistribution = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const distributionId = req.params.id;
     const tenantId = req.user!.tenantId;
 
-    const distribution = await prisma.materialDistribution.findUnique({
+    const distribution = await db.materialDistribution.findUnique({
       where: { id: distributionId },
       include: { items: true, destBranch: true },
     });
@@ -357,16 +353,14 @@ export const receiveDistribution = async (
     }
 
     if (distribution.status !== DistributionStatus.IN_TRANSIT) {
-      res
-        .status(400)
-        .json({
-          success: false,
-          message: "Distribusi sudah diterima atau dibatalkan",
-        });
+      res.status(400).json({
+        success: false,
+        message: "Distribusi sudah diterima atau dibatalkan",
+      });
       return;
     }
 
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       await tx.materialDistribution.update({
         where: { id: distributionId },
         data: { status: DistributionStatus.RECEIVED, receivedAt: new Date() },
@@ -390,12 +384,10 @@ export const receiveDistribution = async (
       }
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Barang berhasil diterima dan stok cabang bertambah",
-      });
+    res.status(200).json({
+      success: true,
+      message: "Barang berhasil diterima dan stok cabang bertambah",
+    });
   } catch (error) {
     res
       .status(500)

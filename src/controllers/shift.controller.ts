@@ -1,6 +1,5 @@
 // src/controllers/shift.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
 
 export interface AuthRequest extends Request {
   user?: {
@@ -18,14 +17,15 @@ export const createShift = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const shift = await prisma.shift.create({ data: req.body });
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: shift,
-        message: "Shift master berhasil dibuat",
-      });
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
+
+    const shift = await db.shift.create({ data: req.body });
+
+    res.status(201).json({
+      success: true,
+      data: shift,
+      message: "Shift master berhasil dibuat",
+    });
   } catch (error) {
     res
       .status(500)
@@ -38,11 +38,14 @@ export const getShifts = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
+
     const branchId = req.query.branchId as string;
-    const shifts = await prisma.shift.findMany({
+    const shifts = await db.shift.findMany({
       where: { branchId },
       include: { _count: { select: { assignments: true } } },
     });
+
     res.status(200).json({ success: true, data: shifts });
   } catch (error) {
     res
@@ -57,24 +60,24 @@ export const assignShift = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
+
     const { userId, shiftId, date } = req.body;
 
     // Konversi date string YYYY-MM-DD ke ISO Date UTC
     const parsedDate = new Date(`${date}T00:00:00Z`);
 
-    const assignment = await prisma.employeeShift.upsert({
+    const assignment = await db.employeeShift.upsert({
       where: { userId_date: { userId, date: parsedDate } },
       update: { shiftId },
       create: { userId, shiftId, date: parsedDate },
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: assignment,
-        message: "Jadwal shift karyawan diperbarui",
-      });
+    res.status(200).json({
+      success: true,
+      data: assignment,
+      message: "Jadwal shift karyawan diperbarui",
+    });
   } catch (error) {
     res
       .status(500)

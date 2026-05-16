@@ -1,8 +1,17 @@
 // src/controllers/refund.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
-import { AuthRequest } from "./shift.controller";
 import { CashFlowType, PaymentStatus, RefundStatus } from "@prisma/client";
+
+// Interface untuk mengatasi error TS 'req.user'
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    tenantId: string;
+    branchId: string | null;
+    roleId: string;
+    email: string;
+  };
+}
 
 // 1. Kasir Mengajukan Refund
 export const createRefundRequest = async (
@@ -10,12 +19,14 @@ export const createRefundRequest = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const { orderId, reason, amount } = req.body;
     const requestedById = req.user!.id;
 
-    const existingOrder = await prisma.order.findUnique({
+    const existingOrder = await db.order.findUnique({
       where: { id: orderId },
     });
+
     if (!existingOrder) {
       res
         .status(404)
@@ -23,7 +34,7 @@ export const createRefundRequest = async (
       return;
     }
 
-    const refund = await prisma.$transaction(async (tx) => {
+    const refund = await db.$transaction(async (tx) => {
       // Ubah status Order menjadi REFUND_PENDING
       await tx.order.update({
         where: { id: orderId },
@@ -41,13 +52,11 @@ export const createRefundRequest = async (
       });
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: refund,
-        message: "Pengajuan refund berhasil dikirim ke Manager",
-      });
+    res.status(201).json({
+      success: true,
+      data: refund,
+      message: "Pengajuan refund berhasil dikirim ke Manager",
+    });
   } catch (error) {
     res
       .status(500)
@@ -61,26 +70,25 @@ export const processRefund = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const refundId = req.params.id;
     const { status } = req.body; // APPROVED / REJECTED
     const approvedById = req.user!.id;
 
-    const refundReq = await prisma.refundRequest.findUnique({
+    const refundReq = await db.refundRequest.findUnique({
       where: { id: refundId },
       include: { order: true },
     });
 
     if (!refundReq || refundReq.status !== RefundStatus.PENDING) {
-      res
-        .status(400)
-        .json({
-          success: false,
-          message: "Refund tidak valid atau sudah diproses",
-        });
+      res.status(400).json({
+        success: false,
+        message: "Refund tidak valid atau sudah diproses",
+      });
       return;
     }
 
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       // 1. Update status tabel Refund
       await tx.refundRequest.update({
         where: { id: refundId },

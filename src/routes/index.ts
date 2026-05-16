@@ -1,5 +1,6 @@
 import { Router } from "express";
 import authRoutes from "./auth.routes";
+import roleRoutes from "./role.routes";
 import settingRoutes from "./setting.routes";
 import branchRoutes from "./branch.routes";
 import employeeRoutes from "./employee.routes";
@@ -20,10 +21,13 @@ import refundRoutes from "./refund.routes";
 import memberRoutes from "./member.routes";
 import promoRoutes from "./promo.routes";
 import reportRoutes from "./report.routes";
+import tenantRoutes from "./tenant.routes";
 
 const router = Router();
 
+router.use("/tenant", tenantRoutes);
 router.use("/auth", authRoutes);
+router.use("/roles", roleRoutes);
 router.use("/settings", settingRoutes);
 router.use("/branches", branchRoutes);
 router.use("/employees", employeeRoutes);

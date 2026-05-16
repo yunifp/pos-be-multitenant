@@ -1,6 +1,5 @@
 // src/controllers/member.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
 import { PointType } from "@prisma/client";
 
 export interface AuthRequest extends Request {
@@ -18,9 +17,11 @@ export const getMembers = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
+
     // Ambil member yang mendaftar di cabang-cabang milik tenant ini
-    const members = await prisma.member.findMany({
+    const members = await db.member.findMany({
       where: { branch: { tenantId } },
       orderBy: { points: "desc" },
       include: { branch: { select: { name: true } } },
@@ -38,30 +39,27 @@ export const createMember = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const { branchId, name, phone, email } = req.body;
 
-    const existing = await prisma.member.findUnique({ where: { phone } });
+    const existing = await db.member.findUnique({ where: { phone } });
     if (existing) {
-      res
-        .status(400)
-        .json({
-          success: false,
-          message: "Nomor HP sudah terdaftar sebagai member",
-        });
+      res.status(400).json({
+        success: false,
+        message: "Nomor HP sudah terdaftar sebagai member",
+      });
       return;
     }
 
-    const member = await prisma.member.create({
+    const member = await db.member.create({
       data: { branchId, name, phone, email, points: 0 },
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: member,
-        message: "Member berhasil didaftarkan",
-      });
+    res.status(201).json({
+      success: true,
+      data: member,
+      message: "Member berhasil didaftarkan",
+    });
   } catch (error) {
     res
       .status(500)
@@ -74,18 +72,19 @@ export const adjustPoints = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const memberId = req.params.id;
     const { amount, description } = req.body;
 
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       const updated = await tx.member.update({
-        where: { id: memberId },
+        where: { id: String(memberId) },
         data: { points: { increment: amount } },
       });
 
       await tx.memberPointHistory.create({
         data: {
-          memberId,
+          memberId : String(memberId),
           type: PointType.ADJUSTMENT,
           amount,
           description,
@@ -94,13 +93,11 @@ export const adjustPoints = async (
       return updated;
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: result,
-        message: "Poin member berhasil disesuaikan",
-      });
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: "Poin member berhasil disesuaikan",
+    });
   } catch (error) {
     res
       .status(500)

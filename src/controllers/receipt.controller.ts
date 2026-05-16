@@ -1,16 +1,29 @@
 // src/controllers/receipt.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
+
+// Interface untuk memastikan TypeScript mengenali tipe data AuthRequest
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    tenantId: string;
+    branchId: string | null;
+    roleId: string;
+    email: string;
+  };
+}
 
 export const getReceiptSetting = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const branchId = req.params.branchId;
-    const setting = await prisma.receiptSetting.findUnique({
+
+    const setting = await db.receiptSetting.findUnique({
       where: { branchId },
     });
+
     res.status(200).json({ success: true, data: setting });
   } catch (error) {
     res
@@ -20,22 +33,23 @@ export const getReceiptSetting = async (
 };
 
 export const updateReceiptSetting = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const branchId = req.params.branchId;
-    const updated = await prisma.receiptSetting.update({
+
+    const updated = await db.receiptSetting.update({
       where: { branchId },
       data: req.body,
     });
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: updated,
-        message: "Pengaturan struk diperbarui",
-      });
+
+    res.status(200).json({
+      success: true,
+      data: updated,
+      message: "Pengaturan struk diperbarui",
+    });
   } catch (error) {
     res
       .status(500)

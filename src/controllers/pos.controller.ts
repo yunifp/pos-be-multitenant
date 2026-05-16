@@ -1,6 +1,5 @@
 // src/controllers/pos.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
 import {
   CashFlowType,
   OrderStatus,
@@ -25,6 +24,7 @@ export const createOrder = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const cashierId = req.user!.id;
     const {
@@ -38,25 +38,23 @@ export const createOrder = async (
     } = req.body;
 
     // 1. Ambil setting pajak perusahaan
-    const setting = await prisma.generalSetting.findUnique({
+    const setting = await db.generalSetting.findUnique({
       where: { tenantId },
     });
     const taxRate = setting ? Number(setting.taxRate) : 0;
 
     // 2. Kumpulkan ID Varian yang dibeli untuk mengambil harga dan Resep (BOM)
     const variantIds = items.map((item: any) => item.variantId);
-    const variants = await prisma.productVariant.findMany({
+    const variants = await db.productVariant.findMany({
       where: { id: { in: variantIds } },
       include: { recipes: true },
     });
 
     if (variants.length !== variantIds.length) {
-      res
-        .status(400)
-        .json({
-          success: false,
-          message: "Beberapa produk dalam keranjang tidak valid",
-        });
+      res.status(400).json({
+        success: false,
+        message: "Beberapa produk dalam keranjang tidak valid",
+      });
       return;
     }
 
@@ -95,17 +93,15 @@ export const createOrder = async (
     let finalPaymentChannel: PaymentChannel = PaymentChannel.BASIC;
 
     if (paymentMethodId) {
-      const bpm = await prisma.branchPaymentMethod.findUnique({
+      const bpm = await db.branchPaymentMethod.findUnique({
         where: { id: paymentMethodId },
       });
 
       if (!bpm || bpm.branchId !== branchId) {
-        res
-          .status(400)
-          .json({
-            success: false,
-            message: "Metode pembayaran tidak valid untuk cabang ini",
-          });
+        res.status(400).json({
+          success: false,
+          message: "Metode pembayaran tidak valid untuk cabang ini",
+        });
         return;
       }
 
@@ -121,7 +117,7 @@ export const createOrder = async (
     const invoiceNumber = `INV-${new Date().getTime()}-${crypto.randomBytes(2).toString("hex").toUpperCase()}`;
 
     // 5. Buka Transaksi Database
-    const order = await prisma.$transaction(async (tx) => {
+    const order = await db.$transaction(async (tx) => {
       // 5a. Pengecekan & Pengurangan Stok Bahan Baku Cabang
       for (const [materialId, requiredQty] of requiredMaterials.entries()) {
         const branchStock = await tx.branchMaterialStock.findUnique({
@@ -179,20 +175,16 @@ export const createOrder = async (
       return newOrder;
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: order,
-        message: "Pesanan berhasil diproses",
-      });
+    res.status(201).json({
+      success: true,
+      data: order,
+      message: "Pesanan berhasil diproses",
+    });
   } catch (error: any) {
-    res
-      .status(400)
-      .json({
-        success: false,
-        message: error.message || "Gagal memproses pesanan",
-      });
+    res.status(400).json({
+      success: false,
+      message: error.message || "Gagal memproses pesanan",
+    });
   }
 };
 
@@ -202,6 +194,7 @@ export const getOrders = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const branchId = req.query.branchId as string;
     const status = req.query.status as OrderStatus;
 
@@ -209,7 +202,7 @@ export const getOrders = async (
     if (branchId) filter.branchId = branchId;
     if (status) filter.status = status;
 
-    const orders = await prisma.order.findMany({
+    const orders = await db.order.findMany({
       where: filter,
       orderBy: { createdAt: "desc" },
       include: {
@@ -238,10 +231,11 @@ export const updateOrderStatus = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const orderId = req.params.id;
     const { status, paymentStatus, paymentMethod, paymentMethodId } = req.body;
 
-    const existingOrder = await prisma.order.findUnique({
+    const existingOrder = await db.order.findUnique({
       where: { id: orderId },
     });
     if (!existingOrder) {
@@ -251,7 +245,7 @@ export const updateOrderStatus = async (
       return;
     }
 
-    const updatedOrder = await prisma.$transaction(async (tx) => {
+    const updatedOrder = await db.$transaction(async (tx) => {
       let updatedPaymentMethod =
         paymentMethod !== undefined
           ? paymentMethod
@@ -316,13 +310,11 @@ export const updateOrderStatus = async (
       return order;
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: updatedOrder,
-        message: "Status pesanan diperbarui",
-      });
+    res.status(200).json({
+      success: true,
+      data: updatedOrder,
+      message: "Status pesanan diperbarui",
+    });
   } catch (error) {
     res
       .status(500)

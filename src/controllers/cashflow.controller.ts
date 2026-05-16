@@ -1,6 +1,5 @@
 // src/controllers/cashflow.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
 import { AuthRequest } from "./pos.controller";
 
 export const getCashFlows = async (
@@ -8,12 +7,14 @@ export const getCashFlows = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
+
     const branchId = req.query.branchId as string;
     const filter = branchId
       ? { branchId }
       : { branch: { tenantId: req.user!.tenantId } };
 
-    const cashflows = await prisma.cashFlow.findMany({
+    const cashflows = await db.cashFlow.findMany({
       where: filter,
       orderBy: { date: "desc" },
       include: { recorder: { select: { fullName: true } } },
@@ -31,9 +32,11 @@ export const createCashFlow = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
+
     const { branchId, amount, type, category, description } = req.body;
 
-    const cashflow = await prisma.cashFlow.create({
+    const cashflow = await db.cashFlow.create({
       data: {
         branchId,
         amount,
@@ -43,13 +46,11 @@ export const createCashFlow = async (
         recordedBy: req.user!.id,
       },
     });
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: cashflow,
-        message: "Catatan kas berhasil ditambahkan",
-      });
+    res.status(201).json({
+      success: true,
+      data: cashflow,
+      message: "Catatan kas berhasil ditambahkan",
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: "Gagal mencatat kas" });
   }

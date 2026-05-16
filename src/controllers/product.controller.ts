@@ -1,6 +1,5 @@
 // src/controllers/product.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
 
 // Interface untuk mengatasi error TS 'req.user'
 export interface AuthRequest extends Request {
@@ -19,8 +18,9 @@ export const getProducts = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
-    const products = await prisma.product.findMany({
+    const products = await db.product.findMany({
       where: { tenantId },
       orderBy: { id: "desc" },
       include: {
@@ -34,13 +34,11 @@ export const getProducts = async (
         },
       },
     });
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: products,
-        message: "Daftar produk berhasil diambil",
-      });
+    res.status(200).json({
+      success: true,
+      data: products,
+      message: "Daftar produk berhasil diambil",
+    });
   } catch (error) {
     res
       .status(500)
@@ -54,6 +52,7 @@ export const getProductById = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const productId = parseInt(req.params.id);
 
@@ -64,7 +63,7 @@ export const getProductById = async (
       return;
     }
 
-    const product = await prisma.product.findFirst({
+    const product = await db.product.findFirst({
       where: { id: productId, tenantId },
       include: {
         category: { select: { name: true } },
@@ -89,13 +88,11 @@ export const getProductById = async (
       return;
     }
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: product,
-        message: "Detail produk berhasil diambil",
-      });
+    res.status(200).json({
+      success: true,
+      data: product,
+      message: "Detail produk berhasil diambil",
+    });
   } catch (error) {
     res
       .status(500)
@@ -109,10 +106,11 @@ export const createProduct = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const { categoryId, branchId, name, variants } = req.body;
 
-    const newProduct = await prisma.product.create({
+    const newProduct = await db.product.create({
       data: {
         tenantId,
         categoryId,
@@ -137,13 +135,11 @@ export const createProduct = async (
       include: { variants: { include: { recipes: true } } },
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: newProduct,
-        message: "Produk berhasil dibuat",
-      });
+    res.status(201).json({
+      success: true,
+      data: newProduct,
+      message: "Produk berhasil dibuat",
+    });
   } catch (error) {
     res
       .status(500)
@@ -157,6 +153,7 @@ export const updateProduct = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const productId = parseInt(req.params.id);
     const { categoryId, branchId, name, variants } = req.body;
@@ -169,7 +166,7 @@ export const updateProduct = async (
     }
 
     // Pastikan produk milik tenant yang sedang login
-    const existingProduct = await prisma.product.findFirst({
+    const existingProduct = await db.product.findFirst({
       where: { id: productId, tenantId },
     });
 
@@ -181,7 +178,7 @@ export const updateProduct = async (
     }
 
     // Gunakan $transaction untuk memastikan integritas data saat Update Nested Relations
-    const updatedProduct = await prisma.$transaction(async (tx) => {
+    const updatedProduct = await db.$transaction(async (tx) => {
       // 1. Jika ada payload variants, hapus semua varian lama (Recipes otomatis terhapus karena onDelete: Cascade di schema)
       if (variants) {
         await tx.productVariant.deleteMany({
@@ -218,13 +215,11 @@ export const updateProduct = async (
       });
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: updatedProduct,
-        message: "Produk berhasil diperbarui",
-      });
+    res.status(200).json({
+      success: true,
+      data: updatedProduct,
+      message: "Produk berhasil diperbarui",
+    });
   } catch (error) {
     res
       .status(500)
@@ -238,6 +233,7 @@ export const deleteProduct = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const productId = parseInt(req.params.id);
 
@@ -248,7 +244,7 @@ export const deleteProduct = async (
       return;
     }
 
-    const existingProduct = await prisma.product.findFirst({
+    const existingProduct = await db.product.findFirst({
       where: { id: productId, tenantId },
     });
 
@@ -260,23 +256,19 @@ export const deleteProduct = async (
     }
 
     // Berkat onDelete: Cascade di schema.prisma, menghapus Product akan otomatis menghapus Varian & Resepnya.
-    await prisma.product.delete({
+    await db.product.delete({
       where: { id: productId },
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Produk beserta varian dan resepnya berhasil dihapus",
-      });
+    res.status(200).json({
+      success: true,
+      message: "Produk beserta varian dan resepnya berhasil dihapus",
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Terjadi kesalahan saat menghapus produk",
-        error,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Terjadi kesalahan saat menghapus produk",
+      error,
+    });
   }
 };

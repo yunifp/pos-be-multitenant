@@ -1,26 +1,34 @@
 // src/controllers/material.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
+
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    tenantId: string;
+    branchId: string | null;
+    roleId: string;
+    email: string;
+  };
+}
 
 // [GET] Ambil semua bahan baku
 export const getMaterials = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
-    const materials = await prisma.material.findMany({
+    const materials = await db.material.findMany({
       where: { tenantId },
       orderBy: { name: "asc" },
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: materials,
-        message: "Daftar bahan baku berhasil diambil",
-      });
+    res.status(200).json({
+      success: true,
+      data: materials,
+      message: "Daftar bahan baku berhasil diambil",
+    });
   } catch (error) {
     res
       .status(500)
@@ -30,14 +38,15 @@ export const getMaterials = async (
 
 // [GET] Ambil detail 1 bahan baku
 export const getMaterialById = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const materialId = req.params.id; // Tipe UUID (String), tidak perlu parseInt
 
-    const material = await prisma.material.findFirst({
+    const material = await db.material.findFirst({
       where: { id: materialId, tenantId },
     });
 
@@ -48,13 +57,11 @@ export const getMaterialById = async (
       return;
     }
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: material,
-        message: "Detail bahan baku berhasil diambil",
-      });
+    res.status(200).json({
+      success: true,
+      data: material,
+      message: "Detail bahan baku berhasil diambil",
+    });
   } catch (error) {
     res
       .status(500)
@@ -64,23 +71,22 @@ export const getMaterialById = async (
 
 // [POST] Tambah bahan baku baru
 export const createMaterial = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
 
-    const material = await prisma.material.create({
+    const material = await db.material.create({
       data: { tenantId, ...req.body },
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: material,
-        message: "Bahan baku berhasil ditambahkan",
-      });
+    res.status(201).json({
+      success: true,
+      data: material,
+      message: "Bahan baku berhasil ditambahkan",
+    });
   } catch (error) {
     res
       .status(500)
@@ -90,15 +96,16 @@ export const createMaterial = async (
 
 // [PUT] Update bahan baku
 export const updateMaterial = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const materialId = req.params.id;
 
     // Pastikan bahan baku milik tenant yang sedang login
-    const existingMaterial = await prisma.material.findFirst({
+    const existingMaterial = await db.material.findFirst({
       where: { id: materialId, tenantId },
     });
 
@@ -109,18 +116,16 @@ export const updateMaterial = async (
       return;
     }
 
-    const updatedMaterial = await prisma.material.update({
+    const updatedMaterial = await db.material.update({
       where: { id: materialId },
       data: req.body,
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: updatedMaterial,
-        message: "Bahan baku berhasil diperbarui",
-      });
+    res.status(200).json({
+      success: true,
+      data: updatedMaterial,
+      message: "Bahan baku berhasil diperbarui",
+    });
   } catch (error) {
     res
       .status(500)
@@ -130,14 +135,15 @@ export const updateMaterial = async (
 
 // [DELETE] Hapus bahan baku
 export const deleteMaterial = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const materialId = req.params.id;
 
-    const existingMaterial = await prisma.material.findFirst({
+    const existingMaterial = await db.material.findFirst({
       where: { id: materialId, tenantId },
     });
 
@@ -148,7 +154,7 @@ export const deleteMaterial = async (
       return;
     }
 
-    await prisma.material.delete({
+    await db.material.delete({
       where: { id: materialId },
     });
 

@@ -1,14 +1,24 @@
 // src/controllers/report.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
-import { AuthRequest } from "./member.controller";
 import { CashFlowType, OrderStatus, PaymentStatus } from "@prisma/client";
+
+// Interface untuk memastikan TypeScript mengenali tipe data AuthRequest dan req.user
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    tenantId: string;
+    branchId: string | null;
+    roleId: string;
+    email: string;
+  };
+}
 
 export const getDashboardStats = async (
   req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const branchId = req.query.branchId as string; // Filter opsional
 
@@ -20,7 +30,7 @@ export const getDashboardStats = async (
 
     // 1. Total Penjualan & Jumlah Order Hari Ini
     // PENYESUAIAN: Menambahkan agregasi untuk subtotal, tax, dan paymentFee (MDR)
-    const orderStats = await prisma.order.aggregate({
+    const orderStats = await db.order.aggregate({
       where: {
         branch: branchFilter,
         createdAt: { gte: today },
@@ -36,7 +46,7 @@ export const getDashboardStats = async (
     });
 
     // 2. Arus Kas (Pendapatan vs Pengeluaran) Hari Ini
-    const cashFlows = await prisma.cashFlow.findMany({
+    const cashFlows = await db.cashFlow.findMany({
       where: { branch: branchFilter, date: { gte: today } },
     });
 
@@ -78,6 +88,7 @@ export const getSalesReport = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const { startDate, endDate, branchId } = req.query;
 
@@ -94,7 +105,7 @@ export const getSalesReport = async (
     }
 
     // PENYESUAIAN: Melampirkan detail item agar laporan penjualan bisa dibedah hingga ke level varian produk
-    const sales = await prisma.order.findMany({
+    const sales = await db.order.findMany({
       where: filter,
       orderBy: { createdAt: "desc" },
       include: {

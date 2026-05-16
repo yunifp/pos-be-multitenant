@@ -1,26 +1,34 @@
 // src/controllers/category.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
+
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    tenantId: string;
+    branchId: string | null;
+    roleId: string;
+    email: string;
+  };
+}
 
 // [GET] Ambil semua kategori
 export const getCategories = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
-    const categories = await prisma.category.findMany({
+    const categories = await db.category.findMany({
       where: { tenantId },
       orderBy: { id: "desc" },
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: categories,
-        message: "Daftar kategori berhasil diambil",
-      });
+    res.status(200).json({
+      success: true,
+      data: categories,
+      message: "Daftar kategori berhasil diambil",
+    });
   } catch (error) {
     res
       .status(500)
@@ -30,10 +38,11 @@ export const getCategories = async (
 
 // [GET] Ambil detail 1 kategori
 export const getCategoryById = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const categoryId = parseInt(req.params.id);
 
@@ -45,7 +54,7 @@ export const getCategoryById = async (
     }
 
     // Gunakan findFirst untuk memastikan kategori ini milik tenant yang sedang login
-    const category = await prisma.category.findFirst({
+    const category = await db.category.findFirst({
       where: { id: categoryId, tenantId },
     });
 
@@ -56,13 +65,11 @@ export const getCategoryById = async (
       return;
     }
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: category,
-        message: "Detail kategori berhasil diambil",
-      });
+    res.status(200).json({
+      success: true,
+      data: category,
+      message: "Detail kategori berhasil diambil",
+    });
   } catch (error) {
     res
       .status(500)
@@ -72,22 +79,21 @@ export const getCategoryById = async (
 
 // [POST] Tambah kategori baru
 export const createCategory = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
-    const category = await prisma.category.create({
+    const category = await db.category.create({
       data: { tenantId, ...req.body },
     });
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: category,
-        message: "Kategori berhasil ditambahkan",
-      });
+    res.status(201).json({
+      success: true,
+      data: category,
+      message: "Kategori berhasil ditambahkan",
+    });
   } catch (error) {
     res
       .status(500)
@@ -97,10 +103,11 @@ export const createCategory = async (
 
 // [PUT] Update kategori
 export const updateCategory = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const categoryId = parseInt(req.params.id);
 
@@ -112,7 +119,7 @@ export const updateCategory = async (
     }
 
     // Cek apakah kategori ada dan milik tenant ini
-    const existingCategory = await prisma.category.findFirst({
+    const existingCategory = await db.category.findFirst({
       where: { id: categoryId, tenantId },
     });
 
@@ -124,18 +131,16 @@ export const updateCategory = async (
     }
 
     // Lakukan update
-    const updatedCategory = await prisma.category.update({
+    const updatedCategory = await db.category.update({
       where: { id: categoryId },
       data: req.body,
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        data: updatedCategory,
-        message: "Kategori berhasil diperbarui",
-      });
+    res.status(200).json({
+      success: true,
+      data: updatedCategory,
+      message: "Kategori berhasil diperbarui",
+    });
   } catch (error) {
     res
       .status(500)
@@ -145,10 +150,11 @@ export const updateCategory = async (
 
 // [DELETE] Hapus kategori
 export const deleteCategory = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const categoryId = parseInt(req.params.id);
 
@@ -160,7 +166,7 @@ export const deleteCategory = async (
     }
 
     // Cek apakah kategori ada dan milik tenant ini
-    const existingCategory = await prisma.category.findFirst({
+    const existingCategory = await db.category.findFirst({
       where: { id: categoryId, tenantId },
     });
 
@@ -172,7 +178,7 @@ export const deleteCategory = async (
     }
 
     // Lakukan penghapusan
-    await prisma.category.delete({
+    await db.category.delete({
       where: { id: categoryId },
     });
 

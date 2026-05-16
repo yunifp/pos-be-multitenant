@@ -1,8 +1,17 @@
 // src/controllers/attendance.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
-import { AuthRequest } from "./shift.controller";
 import { AttendanceStatus } from "@prisma/client";
+
+// Interface mandiri untuk AuthRequest
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    tenantId: string;
+    branchId: string | null;
+    roleId: string;
+    email: string;
+  };
+}
 
 // Clock IN
 export const clockIn = async (
@@ -10,6 +19,7 @@ export const clockIn = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const userId = req.user!.id;
     const { shiftStart, shiftEnd, photoUrl, location, notes } = req.body;
 
@@ -17,17 +27,15 @@ export const clockIn = async (
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const existing = await prisma.attendance.findFirst({
+    const existing = await db.attendance.findFirst({
       where: { userId, date: { gte: today } },
     });
 
     if (existing) {
-      res
-        .status(400)
-        .json({
-          success: false,
-          message: "Anda sudah melakukan Clock In hari ini",
-        });
+      res.status(400).json({
+        success: false,
+        message: "Anda sudah melakukan Clock In hari ini",
+      });
       return;
     }
 
@@ -42,7 +50,7 @@ export const clockIn = async (
         ? AttendanceStatus.LATE
         : AttendanceStatus.PRESENT;
 
-    const attendance = await prisma.attendance.create({
+    const attendance = await db.attendance.create({
       data: {
         userId,
         clockIn: currentTime,
@@ -70,10 +78,11 @@ export const clockOut = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const attendanceId = req.params.id;
 
-    const attendance = await prisma.attendance.update({
-      where: { id: attendanceId },
+    const attendance = await db.attendance.update({
+      where: { id: String(attendanceId) },
       data: { clockOut: new Date() },
     });
 

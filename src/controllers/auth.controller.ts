@@ -1,19 +1,30 @@
 // src/controllers/auth.controller.ts
 import { Request, Response } from "express";
-import bcrypt from "bcrypt";
+import argon2 from "argon2";
 import jwt from "jsonwebtoken";
-import prisma from "../config/prisma";
 import { JobPosition } from "@prisma/client";
 
-const JWT_SECRET = process.env.JWT_SECRET || "supersecretkey123";
-const JWT_EXPIRES_IN = "1d"; // Token berlaku 1 hari
+// Extend Request untuk mengakomodasi req.user (req.db sudah otomatis ada dari global override middleware)
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    tenantId: string;
+    branchId: string | null;
+    roleId: string;
+    email: string;
+  };
+}
 
-export const login = async (req: Request, res: Response): Promise<void> => {
+const JWT_SECRET = process.env.JWT_SECRET || "supersecretkey123";
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1d";
+
+export const login = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const db = req.db;
     const { email, password } = req.body;
 
-    // 1. Cari user berdasarkan email
-    const user = await prisma.user.findUnique({
+    // 1. Cari user berdasarkan email di database tenant spesifik
+    const user = await db.user.findUnique({
       where: { email },
       include: { tenant: true, role: true },
     });
@@ -30,8 +41,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // 2. Validasi Password
-    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    // 2. Validasi Password menggunakan argon2
+    const isPasswordValid = await argon2.verify(user.passwordHash, password);
     if (!isPasswordValid) {
       res.status(401).json({ message: "Email atau password salah" });
       return;
@@ -45,8 +56,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         branchId: user.branchId,
         roleId: user.roleId,
       },
-      JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN },
+      JWT_SECRET as string,
+      { expiresIn: JWT_EXPIRES_IN as any },
     );
 
     // 4. Return Data
@@ -68,11 +79,12 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-export const getMe = async (req: Request, res: Response): Promise<void> => {
+export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const db = req.db;
     const userId = req.user?.id;
 
-    const user = await prisma.user.findUnique({
+    const user = await db.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -116,24 +128,25 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
 
 // Pendaftaran Klien/Bisnis Baru (SaaS Onboarding)
 export const registerTenant = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db;
     const { tenantName, fullName, email, password, phone } = req.body;
 
     // Cek apakah email sudah terdaftar
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const existingUser = await db.user.findUnique({ where: { email } });
     if (existingUser) {
       res.status(400).json({ message: "Email sudah terdaftar" });
       return;
     }
 
-    // Hash Password
-    const passwordHash = await bcrypt.hash(password, 10);
+    // Hash Password menggunakan argon2
+    const passwordHash = await argon2.hash(password);
 
     // Gunakan transaksi untuk memastikan Tenant, Role, dan User dibuat bersamaan
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       // 1. Buat Tenant
       const tenant = await tx.tenant.create({
         data: {

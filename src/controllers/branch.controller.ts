@@ -1,6 +1,5 @@
 // src/controllers/branch.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
 
 // Interface untuk mengatasi error TS 'req.user'
 export interface AuthRequest extends Request {
@@ -19,8 +18,9 @@ export const getBranches = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
-    const branches = await prisma.branch.findMany({
+    const branches = await db.branch.findMany({
       where: { tenantId },
       orderBy: { createdAt: "asc" },
       include: {
@@ -48,11 +48,12 @@ export const getBranchById = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const branchId = req.params.id;
 
-    const branch = await prisma.branch.findFirst({
-      where: { id: branchId, tenantId },
+    const branch = await db.branch.findFirst({
+      where: { id: String(branchId), tenantId },
       include: {
         receiptSetting: true,
         paymentIntegration: true,
@@ -84,10 +85,11 @@ export const createBranch = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
 
     // Gunakan transaksi untuk membuat Cabang, Seting Struk, & Payment secara bersamaan
-    const newBranch = await prisma.$transaction(async (tx) => {
+    const newBranch = await db.$transaction(async (tx) => {
       const branch = await tx.branch.create({
         data: {
           tenantId,
@@ -131,12 +133,13 @@ export const updateBranch = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const branchId = req.params.id;
 
     // Pastikan cabang ada dan milik tenant yang sedang login
-    const existingBranch = await prisma.branch.findFirst({
-      where: { id: branchId, tenantId },
+    const existingBranch = await db.branch.findFirst({
+      where: { id: String(branchId), tenantId },
     });
 
     if (!existingBranch) {
@@ -146,8 +149,8 @@ export const updateBranch = async (
       return;
     }
 
-    const updatedBranch = await prisma.branch.update({
-      where: { id: branchId },
+    const updatedBranch = await db.branch.update({
+      where: { id: String(branchId) },
       data: req.body,
     });
 
@@ -169,11 +172,12 @@ export const deleteBranch = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const branchId = req.params.id;
 
-    const existingBranch = await prisma.branch.findFirst({
-      where: { id: branchId, tenantId },
+    const existingBranch = await db.branch.findFirst({
+      where: { id: String(branchId), tenantId },
     });
 
     if (!existingBranch) {
@@ -184,8 +188,8 @@ export const deleteBranch = async (
     }
 
     // Menghapus cabang akan memicu onDelete: Cascade untuk ReceiptSetting dan PaymentIntegration
-    await prisma.branch.delete({
-      where: { id: branchId },
+    await db.branch.delete({
+      where: { id: String(branchId) },
     });
 
     res.status(200).json({

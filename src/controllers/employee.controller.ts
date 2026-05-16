@@ -1,7 +1,6 @@
 // src/controllers/employee.controller.ts
 import { Request, Response } from "express";
-import prisma from "../config/prisma";
-import bcrypt from "bcrypt";
+import argon2 from "argon2";
 
 // Interface untuk mengatasi error TS 'req.user'
 export interface AuthRequest extends Request {
@@ -20,8 +19,9 @@ export const getEmployees = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
-    const employees = await prisma.user.findMany({
+    const employees = await db.user.findMany({
       where: { tenantId, deletedAt: null }, // Abaikan user yang di-soft-delete
       select: {
         id: true,
@@ -53,11 +53,12 @@ export const getEmployeeById = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const employeeId = req.params.id;
 
-    const employee = await prisma.user.findFirst({
-      where: { id: employeeId, tenantId, deletedAt: null },
+    const employee = await db.user.findFirst({
+      where: { id: String(employeeId), tenantId, deletedAt: null },
       select: {
         id: true,
         email: true,
@@ -94,11 +95,12 @@ export const createEmployee = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const { email, password, ...rest } = req.body;
 
     // Cek apakah email sudah terdaftar di sistem
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const existingUser = await db.user.findUnique({ where: { email } });
     if (existingUser) {
       res
         .status(400)
@@ -106,9 +108,9 @@ export const createEmployee = async (
       return;
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await argon2.hash(password);
 
-    const newUser = await prisma.user.create({
+    const newUser = await db.user.create({
       data: {
         tenantId,
         email,
@@ -136,12 +138,13 @@ export const updateEmployee = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const employeeId = req.params.id;
     const { email, password, ...rest } = req.body;
 
-    const existingEmployee = await prisma.user.findFirst({
-      where: { id: employeeId, tenantId, deletedAt: null },
+    const existingEmployee = await db.user.findFirst({
+      where: { id: String(employeeId), tenantId, deletedAt: null },
     });
 
     if (!existingEmployee) {
@@ -153,24 +156,22 @@ export const updateEmployee = async (
 
     // Jika ingin mengubah email, pastikan email baru belum dipakai orang lain
     if (email && email !== existingEmployee.email) {
-      const emailCheck = await prisma.user.findUnique({ where: { email } });
+      const emailCheck = await db.user.findUnique({ where: { email } });
       if (emailCheck) {
-        res
-          .status(400)
-          .json({
-            success: false,
-            message: "Email sudah digunakan oleh akun lain",
-          });
+        res.status(400).json({
+          success: false,
+          message: "Email sudah digunakan oleh akun lain",
+        });
         return;
       }
     }
 
     const dataToUpdate: any = { ...rest };
     if (email) dataToUpdate.email = email;
-    if (password) dataToUpdate.passwordHash = await bcrypt.hash(password, 10);
+    if (password) dataToUpdate.passwordHash = await argon2.hash(password);
 
-    const updatedEmployee = await prisma.user.update({
-      where: { id: employeeId },
+    const updatedEmployee = await db.user.update({
+      where: { id: String(employeeId) },
       data: dataToUpdate,
       select: {
         id: true,
@@ -199,22 +200,21 @@ export const deleteEmployee = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
     const employeeId = req.params.id;
 
     // Mencegah user menghapus akunnya sendiri secara tidak sengaja
     if (req.user!.id === employeeId) {
-      res
-        .status(400)
-        .json({
-          success: false,
-          message: "Anda tidak dapat menghapus akun Anda sendiri",
-        });
+      res.status(400).json({
+        success: false,
+        message: "Anda tidak dapat menghapus akun Anda sendiri",
+      });
       return;
     }
 
-    const existingEmployee = await prisma.user.findFirst({
-      where: { id: employeeId, tenantId, deletedAt: null },
+    const existingEmployee = await db.user.findFirst({
+      where: { id: String(employeeId), tenantId, deletedAt: null },
     });
 
     if (!existingEmployee) {
@@ -225,8 +225,8 @@ export const deleteEmployee = async (
     }
 
     // Gunakan Soft Delete agar riwayat transaksi/cashflow karyawan ini tidak error/hilang
-    await prisma.user.update({
-      where: { id: employeeId },
+    await db.user.update({
+      where: { id: String(employeeId) },
       data: {
         isActive: false,
         deletedAt: new Date(),
