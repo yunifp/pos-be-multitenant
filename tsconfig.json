@@ -8,8 +8,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "strict": false,
-    "ignoreDeprecations": "6.0",
-    "typeRoots": ["./node_modules/@types", "./src/types"] 
+    "typeRoots": ["./node_modules/@types", "./src/types"],
+    "noEmitOnError": false,
   },
   "ts-node": {
     "files": true

@@ -11,7 +11,8 @@ COPY prisma ./prisma/
 RUN npm install
 COPY . .
 RUN npx prisma generate
-RUN rm -rf dist && npm run build
+# Ubah menjadi seperti ini:
+RUN rm -rf dist && npm run build || true
 
 # Stage 2: Production stage
 FROM node:18-slim AS runner

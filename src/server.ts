@@ -11,7 +11,7 @@ app.use(express.json());
 app.use(tenantMiddleware);
 
 // Load semua routes
-app.use("/api", mainRouter);
+app.use("/api/v1", mainRouter);
 
 app.listen(3000, () => {
   console.log("🚀 Server berjalan di http://localhost:3000");

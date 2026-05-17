@@ -24,9 +24,21 @@ export const login = async (req: AuthRequest, res: Response): Promise<void> => {
     const { email, password } = req.body;
 
     // 1. Cari user berdasarkan email di database tenant spesifik
+    // Perbaikan: Melakukan deep include untuk mengambil daftar permissions
     const user = await db.user.findUnique({
       where: { email },
-      include: { tenant: true, role: true },
+      include: {
+        tenant: true,
+        role: {
+          include: {
+            permissions: {
+              include: {
+                permission: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!user) {
@@ -60,6 +72,11 @@ export const login = async (req: AuthRequest, res: Response): Promise<void> => {
       { expiresIn: JWT_EXPIRES_IN as any },
     );
 
+    // Perbaikan: Format permissions agar menjadi array of string (mudah dibaca Frontend)
+    const userPermissions = user.role.permissions.map(
+      (rp) => rp.permission.code,
+    );
+
     // 4. Return Data
     res.status(200).json({
       message: "Login berhasil",
@@ -70,6 +87,7 @@ export const login = async (req: AuthRequest, res: Response): Promise<void> => {
         email: user.email,
         jobPosition: user.jobPosition,
         role: user.role.name,
+        permissions: userPermissions, // Sekarang berupa array string, misal: ["POS_READ", "POS_CREATE"]
         tenantId: user.tenantId,
         branchId: user.branchId,
       },

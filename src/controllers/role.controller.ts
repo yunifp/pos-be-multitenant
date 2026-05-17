@@ -80,7 +80,7 @@ export const getRoleById = async (
   try {
     const db = req.db;
     const tenantId = req.user!.tenantId;
-    const roleId = req.params.id;
+    const roleId = req.params.id as string; // Fix: Menambahkan as string
 
     const role = await db.role.findFirst({
       where: { id: roleId, tenantId },
@@ -173,7 +173,7 @@ export const updateRole = async (
   try {
     const db = req.db;
     const tenantId = req.user!.tenantId;
-    const roleId = req.params.id;
+    const roleId = req.params.id as string; // Fix: Menambahkan as string
     const { name, description, permissionIds } = req.body;
 
     const existingRole = await db.role.findFirst({
@@ -230,7 +230,7 @@ export const deleteRole = async (
   try {
     const db = req.db;
     const tenantId = req.user!.tenantId;
-    const roleId = req.params.id;
+    const roleId = req.params.id as string; // Fix: Menambahkan as string
 
     // Jangan izinkan menghapus role 'Owner' default (Optional safety guard)
     const existingRole = await db.role.findFirst({
