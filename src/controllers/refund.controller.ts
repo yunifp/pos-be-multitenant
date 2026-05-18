@@ -76,7 +76,7 @@ export const processRefund = async (
     const approvedById = req.user!.id;
 
     const refundReq = await db.refundRequest.findUnique({
-      where: { id: refundId },
+      where: { id: String(refundId) },
       include: { order: true },
     });
 
@@ -91,7 +91,7 @@ export const processRefund = async (
     await db.$transaction(async (tx) => {
       // 1. Update status tabel Refund
       await tx.refundRequest.update({
-        where: { id: refundId },
+        where: { id: String(refundId) },
         data: { status, approvedById },
       });
 

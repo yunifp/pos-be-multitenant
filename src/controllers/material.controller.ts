@@ -47,7 +47,7 @@ export const getMaterialById = async (
     const materialId = req.params.id; // Tipe UUID (String), tidak perlu parseInt
 
     const material = await db.material.findFirst({
-      where: { id: materialId, tenantId },
+      where: { id: String(materialId), tenantId },
     });
 
     if (!material) {
@@ -106,7 +106,7 @@ export const updateMaterial = async (
 
     // Pastikan bahan baku milik tenant yang sedang login
     const existingMaterial = await db.material.findFirst({
-      where: { id: materialId, tenantId },
+      where: { id: String(materialId), tenantId },
     });
 
     if (!existingMaterial) {
@@ -117,7 +117,7 @@ export const updateMaterial = async (
     }
 
     const updatedMaterial = await db.material.update({
-      where: { id: materialId },
+      where: { id: String(materialId) },
       data: req.body,
     });
 
@@ -144,7 +144,7 @@ export const deleteMaterial = async (
     const materialId = req.params.id;
 
     const existingMaterial = await db.material.findFirst({
-      where: { id: materialId, tenantId },
+      where: { id: String(materialId), tenantId },
     });
 
     if (!existingMaterial) {
@@ -155,7 +155,7 @@ export const deleteMaterial = async (
     }
 
     await db.material.delete({
-      where: { id: materialId },
+      where: { id: String(materialId) },
     });
 
     res

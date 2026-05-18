@@ -47,7 +47,7 @@ export const getWarehouseById = async (
     const warehouseId = req.params.id;
 
     const warehouse = await db.warehouse.findFirst({
-      where: { id: warehouseId, tenantId },
+      where: { id: String(warehouseId), tenantId },
       include: {
         stocks: {
           include: { material: { select: { name: true, unit: true } } },
@@ -102,7 +102,7 @@ export const updateWarehouse = async (
     const warehouseId = req.params.id;
 
     const existing = await db.warehouse.findFirst({
-      where: { id: warehouseId, tenantId },
+      where: { id: String(warehouseId), tenantId },
     });
 
     if (!existing) {
@@ -113,7 +113,7 @@ export const updateWarehouse = async (
     }
 
     const updated = await db.warehouse.update({
-      where: { id: warehouseId },
+      where: { id: String(warehouseId) },
       data: req.body,
     });
 
@@ -137,7 +137,7 @@ export const deleteWarehouse = async (
     const warehouseId = req.params.id;
 
     const existing = await db.warehouse.findFirst({
-      where: { id: warehouseId, tenantId },
+      where: { id: String(warehouseId), tenantId },
     });
 
     if (!existing) {
@@ -147,7 +147,7 @@ export const deleteWarehouse = async (
       return;
     }
 
-    await db.warehouse.delete({ where: { id: warehouseId } });
+    await db.warehouse.delete({ where: { id: String(warehouseId) } });
     res.status(200).json({ success: true, message: "Gudang dihapus" });
   } catch (error) {
     res.status(500).json({
@@ -175,7 +175,7 @@ export const addWarehouseStock = async (
 
     // Pastikan gudang tersebut ada dan milik tenant
     const warehouse = await db.warehouse.findFirst({
-      where: { id: warehouseId, tenantId },
+      where: { id: String(warehouseId), tenantId },
     });
 
     if (!warehouse) {
@@ -187,9 +187,14 @@ export const addWarehouseStock = async (
 
     // Gunakan upsert: Jika stok belum ada maka buat record baru, jika ada maka tambah quantity-nya
     const stock = await db.warehouseStock.upsert({
-      where: { warehouseId_materialId: { warehouseId, materialId } },
+      where: {
+        warehouseId_materialId: {
+          warehouseId: String(warehouseId),
+          materialId,
+        },
+      },
       update: { quantity: { increment: quantity } },
-      create: { warehouseId, materialId, quantity },
+      create: { warehouseId: String(warehouseId), materialId, quantity },
       include: { material: { select: { name: true, unit: true } } },
     });
 
@@ -341,7 +346,7 @@ export const receiveDistribution = async (
     const tenantId = req.user!.tenantId;
 
     const distribution = await db.materialDistribution.findUnique({
-      where: { id: distributionId },
+      where: { id: String(distributionId) },
       include: { items: true, destBranch: true },
     });
 
@@ -362,7 +367,7 @@ export const receiveDistribution = async (
 
     await db.$transaction(async (tx) => {
       await tx.materialDistribution.update({
-        where: { id: distributionId },
+        where: { id: String(distributionId) },
         data: { status: DistributionStatus.RECEIVED, receivedAt: new Date() },
       });
 

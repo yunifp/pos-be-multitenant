@@ -20,20 +20,20 @@ const router = Router();
 router.use(verifyToken);
 
 // Daftar endpoints
-router.get("/", requirePermission("INVENTORY_READ"), getCategories);
-router.get("/:id", requirePermission("INVENTORY_READ"), getCategoryById);
+router.get("/", requirePermission("CATEGORY_READ"), getCategories);
+router.get("/:id", requirePermission("CATEGORY_READ"), getCategoryById);
 router.post(
   "/",
-  requirePermission("INVENTORY_CREATE"),
+  requirePermission("CATEGORY_CREATE"),
   validate(createCategorySchema),
   createCategory,
 );
 router.put(
   "/:id",
-  requirePermission("INVENTORY_UPDATE"),
+  requirePermission("CATEGORY_UPDATE"),
   validate(updateCategorySchema),
   updateCategory,
 );
-router.delete("/:id", requirePermission("INVENTORY_DELETE"), deleteCategory);
+router.delete("/:id", requirePermission("CATEGORY_DELETE"), deleteCategory);
 
 export default router;

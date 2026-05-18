@@ -21,7 +21,7 @@ export const getReceiptSetting = async (
     const branchId = req.params.branchId;
 
     const setting = await db.receiptSetting.findUnique({
-      where: { branchId },
+      where: { branchId: String(branchId) },
     });
 
     res.status(200).json({ success: true, data: setting });
@@ -41,7 +41,7 @@ export const updateReceiptSetting = async (
     const branchId = req.params.branchId;
 
     const updated = await db.receiptSetting.update({
-      where: { branchId },
+      where: { branchId: String(branchId) },
       data: req.body,
     });
 

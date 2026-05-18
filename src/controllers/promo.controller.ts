@@ -132,7 +132,11 @@ export const updatePromotion = async (
 
     // Pastikan promo ada dan terhubung dengan tenant ini
     const existingPromo = await db.promotion.findFirst({
-      where: { id: promoId, branches: { some: { tenantId } }, deletedAt: null },
+      where: {
+        id: String(promoId),
+        branches: { some: { tenantId } },
+        deletedAt: null,
+      },
     });
 
     if (!existingPromo) {
@@ -158,12 +162,12 @@ export const updatePromotion = async (
       // Jika ada perubahan pada target varian produk, hapus yang lama
       if (targetVariantIds) {
         await tx.promotionTarget.deleteMany({
-          where: { promotionId: promoId },
+          where: { promotionId: String(promoId) },
         });
       }
 
       return await tx.promotion.update({
-        where: { id: promoId },
+        where: { id: String(promoId) },
         data: {
           name,
           code,
@@ -217,7 +221,11 @@ export const deletePromotion = async (
     const tenantId = req.user!.tenantId;
 
     const existingPromo = await db.promotion.findFirst({
-      where: { id: promoId, branches: { some: { tenantId } }, deletedAt: null },
+      where: {
+        id: String(promoId),
+        branches: { some: { tenantId } },
+        deletedAt: null,
+      },
     });
 
     if (!existingPromo) {
@@ -229,26 +237,22 @@ export const deletePromotion = async (
 
     // Menggunakan Soft Delete untuk menjaga integritas riwayat order masa lalu
     await db.promotion.update({
-      where: { id: promoId },
+      where: { id: String(promoId) },
       data: {
         isActive: false,
         deletedAt: new Date(),
       },
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Promo berhasil dihapus (dinonaktifkan)",
-      });
+    res.status(200).json({
+      success: true,
+      message: "Promo berhasil dihapus (dinonaktifkan)",
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Terjadi kesalahan saat menghapus promo",
-        error,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Terjadi kesalahan saat menghapus promo",
+      error,
+    });
   }
 };

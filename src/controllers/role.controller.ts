@@ -28,6 +28,7 @@ export const getPermissions = async (
       message: "Daftar Permissions berhasil diambil",
     });
   } catch (error) {
+    console.log("ERROR", error);
     res
       .status(500)
       .json({ success: false, message: "Terjadi kesalahan server", error });
@@ -80,10 +81,10 @@ export const getRoleById = async (
   try {
     const db = req.db;
     const tenantId = req.user!.tenantId;
-    const roleId = req.params.id as string; // Fix: Menambahkan as string
+    const roleId = req.params.id;
 
     const role = await db.role.findFirst({
-      where: { id: roleId, tenantId },
+      where: { id: String(roleId), tenantId },
       include: {
         permissions: {
           include: { permission: true },
@@ -107,6 +108,7 @@ export const getRoleById = async (
       message: "Detail Role berhasil diambil",
     });
   } catch (error) {
+    console.log("ERROR", error);
     res
       .status(500)
       .json({ success: false, message: "Terjadi kesalahan server", error });
@@ -173,11 +175,11 @@ export const updateRole = async (
   try {
     const db = req.db;
     const tenantId = req.user!.tenantId;
-    const roleId = req.params.id as string; // Fix: Menambahkan as string
+    const roleId = req.params.id;
     const { name, description, permissionIds } = req.body;
 
     const existingRole = await db.role.findFirst({
-      where: { id: roleId, tenantId },
+      where: { id: String(roleId), tenantId },
     });
 
     if (!existingRole) {
@@ -189,19 +191,19 @@ export const updateRole = async (
     const updatedRole = await db.$transaction(async (tx) => {
       // 1. Update data dasar role
       const role = await tx.role.update({
-        where: { id: roleId },
+        where: { id: String(roleId) },
         data: { name, description },
       });
 
       // 2. Jika permissionIds dikirim, kita hapus relasi lama dan masukkan yang baru (Sync)
       if (permissionIds && Array.isArray(permissionIds)) {
         await tx.rolePermission.deleteMany({
-          where: { roleId: roleId },
+          where: { roleId: String(roleId) },
         });
 
         await tx.rolePermission.createMany({
           data: permissionIds.map((permId: string) => ({
-            roleId: roleId,
+            roleId: String(roleId),
             permissionId: permId,
           })),
         });
@@ -230,11 +232,11 @@ export const deleteRole = async (
   try {
     const db = req.db;
     const tenantId = req.user!.tenantId;
-    const roleId = req.params.id as string; // Fix: Menambahkan as string
+    const roleId = req.params.id;
 
     // Jangan izinkan menghapus role 'Owner' default (Optional safety guard)
     const existingRole = await db.role.findFirst({
-      where: { id: roleId, tenantId },
+      where: { id: String(roleId), tenantId },
       include: { _count: { select: { users: true } } },
     });
 
@@ -254,7 +256,7 @@ export const deleteRole = async (
 
     // Menghapus Role akan memicu Cascade delete pada tabel `RolePermission`
     await db.role.delete({
-      where: { id: roleId },
+      where: { id: String(roleId) },
     });
 
     res.status(200).json({

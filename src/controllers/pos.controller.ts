@@ -236,7 +236,7 @@ export const updateOrderStatus = async (
     const { status, paymentStatus, paymentMethod, paymentMethodId } = req.body;
 
     const existingOrder = await db.order.findUnique({
-      where: { id: orderId },
+      where: { id: String(orderId) },
     });
     if (!existingOrder) {
       res
@@ -279,7 +279,7 @@ export const updateOrderStatus = async (
       }
 
       const order = await tx.order.update({
-        where: { id: orderId },
+        where: { id: String(orderId) },
         data: {
           status,
           paymentStatus,

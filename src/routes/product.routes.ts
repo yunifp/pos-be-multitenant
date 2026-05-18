@@ -20,23 +20,23 @@ const router = Router();
 router.use(verifyToken);
 
 // Daftar Endpoints
-router.get("/", requirePermission("INVENTORY_READ"), getProducts as any);
-router.get("/:id", requirePermission("INVENTORY_READ"), getProductById as any);
+router.get("/", requirePermission("PRODUCT_READ"), getProducts as any);
+router.get("/:id", requirePermission("PRODUCT_READ"), getProductById as any);
 router.post(
   "/",
-  requirePermission("INVENTORY_CREATE"),
+  requirePermission("PRODUCT_CREATE"),
   validate(createProductSchema),
   createProduct as any,
 );
 router.put(
   "/:id",
-  requirePermission("INVENTORY_UPDATE"),
+  requirePermission("PRODUCT_UPDATE"),
   validate(updateProductSchema),
   updateProduct as any,
 );
 router.delete(
   "/:id",
-  requirePermission("INVENTORY_DELETE"),
+  requirePermission("PRODUCT_DELETE"),
   deleteProduct as any,
 );
 

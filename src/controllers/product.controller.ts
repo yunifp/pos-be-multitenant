@@ -1,7 +1,6 @@
 // src/controllers/product.controller.ts
 import { Request, Response } from "express";
 
-// Interface untuk mengatasi error TS 'req.user'
 export interface AuthRequest extends Request {
   user?: {
     id: string;
@@ -18,13 +17,18 @@ export const getProducts = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
+    const db = req.db;
     const tenantId = req.user!.tenantId;
     const products = await db.product.findMany({
       where: { tenantId },
       orderBy: { id: "desc" },
       include: {
         category: { select: { name: true } },
+        // Ambil resep langsung dari produk tunggal (jika ada)
+        recipes: {
+          include: { material: { select: { name: true, unit: true } } },
+        },
+        // Ambil varian dan resep varian (jika ada)
         variants: {
           include: {
             recipes: {
@@ -52,9 +56,11 @@ export const getProductById = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
+    const db = req.db;
     const tenantId = req.user!.tenantId;
-    const productId = parseInt(req.params.id);
+    const idParam = req.params.id;
+    const idString = Array.isArray(idParam) ? idParam[0] : (idParam as string);
+    const productId = parseInt(idString);
 
     if (isNaN(productId)) {
       res
@@ -67,6 +73,11 @@ export const getProductById = async (
       where: { id: productId, tenantId },
       include: {
         category: { select: { name: true } },
+        recipes: {
+          include: {
+            material: { select: { name: true, unit: true, costPerUnit: true } },
+          },
+        },
         variants: {
           include: {
             recipes: {
@@ -106,9 +117,21 @@ export const createProduct = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
+    const db = req.db;
     const tenantId = req.user!.tenantId;
-    const { categoryId, branchId, name, variants } = req.body;
+
+    // hasVariant (Boolean) menentukan mode produk (Tunggal vs Varian)
+    const {
+      categoryId,
+      branchId,
+      name,
+      hasVariant,
+      price,
+      trackStock,
+      stock,
+      recipes,
+      variants,
+    } = req.body;
 
     const newProduct = await db.product.create({
       data: {
@@ -116,23 +139,54 @@ export const createProduct = async (
         categoryId,
         branchId,
         name,
-        variants: {
-          create: variants.map((variant: any) => ({
-            name: variant.name,
-            price: variant.price,
-            recipes:
-              variant.recipes && variant.recipes.length > 0
-                ? {
-                    create: variant.recipes.map((recipe: any) => ({
-                      materialId: recipe.materialId,
-                      quantityRequired: recipe.quantityRequired,
-                    })),
-                  }
-                : undefined,
-          })),
-        },
+        hasVariant: hasVariant || false,
+
+        // --- DATA PRODUK TUNGGAL ---
+        price: hasVariant ? null : price,
+        trackStock: hasVariant ? false : trackStock || false,
+        stock: hasVariant ? null : stock || 0,
+
+        // Jika produk TUNGGAL punya resep (F&B)
+        ...(!hasVariant &&
+          recipes &&
+          recipes.length > 0 && {
+            recipes: {
+              create: recipes.map((recipe: any) => ({
+                materialId: recipe.materialId,
+                quantityRequired: recipe.quantityRequired,
+              })),
+            },
+          }),
+
+        // --- DATA PRODUK VARIAN ---
+        // Jika produk VARIAN, masukkan list variannya
+        ...(hasVariant &&
+          variants &&
+          variants.length > 0 && {
+            variants: {
+              create: variants.map((variant: any) => ({
+                name: variant.name,
+                price: variant.price,
+                trackStock: variant.trackStock || false,
+                stock: variant.stock || 0,
+                // Varian F&B yang punya resep masing-masing
+                ...(variant.recipes &&
+                  variant.recipes.length > 0 && {
+                    recipes: {
+                      create: variant.recipes.map((recipe: any) => ({
+                        materialId: recipe.materialId,
+                        quantityRequired: recipe.quantityRequired,
+                      })),
+                    },
+                  }),
+              })),
+            },
+          }),
       },
-      include: { variants: { include: { recipes: true } } },
+      include: {
+        recipes: true,
+        variants: { include: { recipes: true } },
+      },
     });
 
     res.status(201).json({
@@ -141,22 +195,36 @@ export const createProduct = async (
       message: "Produk berhasil dibuat",
     });
   } catch (error) {
+    console.error("Error create product:", error);
     res
       .status(500)
       .json({ success: false, message: "Gagal membuat produk", error });
   }
 };
 
-// [PUT] Update Produk (Sistem Re-create Variants & Recipes agar aman dan konsisten)
+// [PUT] Update Produk
 export const updateProduct = async (
   req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
-    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
+    const db = req.db;
     const tenantId = req.user!.tenantId;
-    const productId = parseInt(req.params.id);
-    const { categoryId, branchId, name, variants } = req.body;
+    const idParam = req.params.id;
+    const idString = Array.isArray(idParam) ? idParam[0] : (idParam as string);
+    const productId = parseInt(idString);
+
+    const {
+      categoryId,
+      branchId,
+      name,
+      hasVariant,
+      price,
+      trackStock,
+      stock,
+      recipes,
+      variants,
+    } = req.body;
 
     if (isNaN(productId)) {
       res
@@ -165,7 +233,6 @@ export const updateProduct = async (
       return;
     }
 
-    // Pastikan produk milik tenant yang sedang login
     const existingProduct = await db.product.findFirst({
       where: { id: productId, tenantId },
     });
@@ -177,41 +244,61 @@ export const updateProduct = async (
       return;
     }
 
-    // Gunakan $transaction untuk memastikan integritas data saat Update Nested Relations
+    // Gunakan $transaction untuk memastikan integritas data
     const updatedProduct = await db.$transaction(async (tx) => {
-      // 1. Jika ada payload variants, hapus semua varian lama (Recipes otomatis terhapus karena onDelete: Cascade di schema)
-      if (variants) {
-        await tx.productVariant.deleteMany({
-          where: { productId: productId },
-        });
-      }
+      await tx.recipe.deleteMany({ where: { productId: productId } });
+      await tx.productVariant.deleteMany({ where: { productId: productId } });
 
-      // 2. Update data base produk sekaligus membuat varian/resep baru (jika ada)
+      // 2. MASUKKAN DATA BARU
       return await tx.product.update({
         where: { id: productId },
         data: {
           categoryId,
           branchId,
           name,
-          ...(variants && {
-            variants: {
-              create: variants.map((variant: any) => ({
-                name: variant.name,
-                price: variant.price,
-                recipes:
-                  variant.recipes && variant.recipes.length > 0
-                    ? {
+          hasVariant: hasVariant || false,
+
+          price: hasVariant ? null : price,
+          trackStock: hasVariant ? false : trackStock || false,
+          stock: hasVariant ? null : stock || 0,
+
+          ...(!hasVariant &&
+            recipes &&
+            recipes.length > 0 && {
+              recipes: {
+                create: recipes.map((recipe: any) => ({
+                  materialId: recipe.materialId,
+                  quantityRequired: recipe.quantityRequired,
+                })),
+              },
+            }),
+
+          ...(hasVariant &&
+            variants &&
+            variants.length > 0 && {
+              variants: {
+                create: variants.map((variant: any) => ({
+                  name: variant.name,
+                  price: variant.price,
+                  trackStock: variant.trackStock || false,
+                  stock: variant.stock || 0,
+                  ...(variant.recipes &&
+                    variant.recipes.length > 0 && {
+                      recipes: {
                         create: variant.recipes.map((recipe: any) => ({
                           materialId: recipe.materialId,
                           quantityRequired: recipe.quantityRequired,
                         })),
-                      }
-                    : undefined,
-              })),
-            },
-          }),
+                      },
+                    }),
+                })),
+              },
+            }),
         },
-        include: { variants: { include: { recipes: true } } },
+        include: {
+          recipes: true,
+          variants: { include: { recipes: true } },
+        },
       });
     });
 
@@ -221,6 +308,7 @@ export const updateProduct = async (
       message: "Produk berhasil diperbarui",
     });
   } catch (error) {
+    console.error("Error update product:", error);
     res
       .status(500)
       .json({ success: false, message: "Gagal memperbarui produk", error });
@@ -233,9 +321,11 @@ export const deleteProduct = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
+    const db = req.db;
     const tenantId = req.user!.tenantId;
-    const productId = parseInt(req.params.id);
+    const idParam = req.params.id;
+    const idString = Array.isArray(idParam) ? idParam[0] : (idParam as string);
+    const productId = parseInt(idString);
 
     if (isNaN(productId)) {
       res
@@ -255,7 +345,10 @@ export const deleteProduct = async (
       return;
     }
 
-    // Berkat onDelete: Cascade di schema.prisma, menghapus Product akan otomatis menghapus Varian & Resepnya.
+    // Berkat onDelete: Cascade di schema.prisma, menghapus Product akan otomatis menghapus:
+    // 1. Resep Produk Tunggal
+    // 2. Varian-variannya
+    // 3. Resep dari Varian tersebut
     await db.product.delete({
       where: { id: productId },
     });

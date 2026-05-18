@@ -44,7 +44,10 @@ export const getCategoryById = async (
   try {
     const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
-    const categoryId = parseInt(req.params.id);
+    const idParam = req.params.id;
+    // Jika berupa array, ambil index [0]. Jika bukan, langsung jadikan string.
+    const idString = Array.isArray(idParam) ? idParam[0] : (idParam as string);
+    const categoryId = parseInt(idString);
 
     if (isNaN(categoryId)) {
       res
@@ -109,7 +112,10 @@ export const updateCategory = async (
   try {
     const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
-    const categoryId = parseInt(req.params.id);
+    const idParam = req.params.id;
+    // Jika berupa array, ambil index [0]. Jika bukan, langsung jadikan string.
+    const idString = Array.isArray(idParam) ? idParam[0] : (idParam as string);
+    const categoryId = parseInt(idString);
 
     if (isNaN(categoryId)) {
       res
@@ -156,7 +162,10 @@ export const deleteCategory = async (
   try {
     const db = req.db; // Mengambil instance Prisma dari Tenant Middleware
     const tenantId = req.user!.tenantId;
-    const categoryId = parseInt(req.params.id);
+    const idParam = req.params.id;
+    // Jika berupa array, ambil index [0]. Jika bukan, langsung jadikan string.
+    const idString = Array.isArray(idParam) ? idParam[0] : (idParam as string);
+    const categoryId = parseInt(idString);
 
     if (isNaN(categoryId)) {
       res
