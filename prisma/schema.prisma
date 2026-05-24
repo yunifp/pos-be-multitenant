@@ -138,7 +138,6 @@ model Tenant {
   // Relasi ke Data Milik Tenant
   branches       Branch[]
   users          User[]
-  roles          Role[]
   categories     Category[]
   materials      Material[]
   warehouses     Warehouse[]
@@ -146,47 +145,6 @@ model Tenant {
   products       Product[]
 
   @@map("tenants")
-}
-
-// ==========================================
-// 2. DYNAMIC RBAC (Role-Based Access Control)
-// ==========================================
-
-model Role {
-  id          String  @id @default(uuid())
-  tenantId    String  @map("tenant_id")
-  name        String // cth: "Super Admin", "Kasir Reguler", "Manager Gudang"
-  description String?
-
-  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  permissions RolePermission[]
-  users       User[]
-
-  @@map("roles")
-}
-
-model Permission {
-  id          String  @id @default(uuid())
-  module      String // cth: "INVENTORY", "FINANCE", "ORDER"
-  action      String // cth: "CREATE", "READ", "UPDATE", "DELETE"
-  code        String  @unique // cth: "INVENTORY_CREATE"
-  description String?
-
-  roles RolePermission[]
-
-  @@map("permissions")
-}
-
-model RolePermission {
-  id           String @id @default(uuid())
-  roleId       String @map("role_id")
-  permissionId String @map("permission_id")
-
-  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-
-  @@unique([roleId, permissionId])
-  @@map("role_permissions")
 }
 
 // ==========================================
@@ -301,7 +259,7 @@ model User {
   id       String  @id @default(uuid())
   tenantId String  @map("tenant_id")
   branchId String? @map("branch_id")
-  roleId   String  @map("role_id") // Relasi RBAC
+  roleId   String  @map("role_id")
 
   email        String      @unique
   passwordHash String      @map("password_hash")
@@ -315,7 +273,6 @@ model User {
 
   tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch Branch? @relation(fields: [branchId], references: [id])
-  role   Role    @relation(fields: [roleId], references: [id])
 
   orders               Order[]
   cashFlows            CashFlow[]

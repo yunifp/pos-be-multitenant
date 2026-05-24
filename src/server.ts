@@ -16,3 +16,23 @@ app.use("/api/v1", mainRouter);
 app.listen(3000, () => {
   console.log("🚀 Server berjalan di http://localhost:3000");
 });
+
+app.use(
+  (
+    err: any,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    console.error("============= [GLOBAL ERROR INTERCEPTOR] =============");
+    console.error("Penyebab Error Sebenarnya:");
+    console.error(err); // Ini akan mencetak stack trace, file mana, dan baris keberapa yang hancur
+    console.error("======================================================");
+
+    res.status(500).json({
+      success: false,
+      message: "Internal server error (Caught by Global Handler)",
+      error: err.message,
+    });
+  },
+);

@@ -1,5 +1,7 @@
 // src/controllers/role.controller.ts
 import { Request, Response } from "express";
+import { generateInternalToken } from "../lib/internal-auth";
+import { extractTenantSlug } from "../middlewares/tenant.middleware";
 
 export interface AuthRequest extends Request {
   user?: {
@@ -11,27 +13,63 @@ export interface AuthRequest extends Request {
   };
 }
 
-// [GET] Ambil Semua Daftar Izin Statis (Untuk ditampilkan di Form Builder Checkbox Frontend)
+// ============================================================================
+// READ OPERATIONS (DIAMBIL DARI CONTROL PLANE API)
+// ============================================================================
+
+// [GET] Ambil Semua Daftar Izin Statis
 export const getPermissions = async (
   req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
-    const db = req.db;
-    const permissions = await db.permission.findMany({
-      orderBy: [{ module: "asc" }, { action: "asc" }],
+    console.log("[getPermissions] Memulai ekstraksi slug...");
+    const slug = extractTenantSlug(req);
+    console.log(`[getPermissions] Slug ditemukan: "${slug}"`);
+    if (!slug) throw new Error("Invalid tenant slug");
+
+    const controlPlaneUrl = process.env.CONTROL_PLANE_URL;
+    if (!controlPlaneUrl)
+      throw new Error("CONTROL_PLANE_URL is not defined di .env");
+
+    const token = generateInternalToken(slug);
+    const endpoint = `${controlPlaneUrl}/api/internal/tenant-permissions?slug=${encodeURIComponent(slug)}`;
+
+    console.log(`[getPermissions] Fetching ke Control Plane: ${endpoint}`);
+    const response = await fetch(endpoint, {
+      headers: { "x-internal-token": token },
+      signal: AbortSignal.timeout(5000),
     });
+
+    const jsonResponse = await response.json().catch(() => ({}));
+    console.log(
+      "[getPermissions] Respon dari Control Plane diterima:",
+      jsonResponse,
+    );
+
+    if (!response.ok) {
+      res.status(response.status).json({
+        success: false,
+        message:
+          jsonResponse.message ||
+          "Gagal mengambil permissions dari Control Plane",
+      });
+      return;
+    }
 
     res.status(200).json({
       success: true,
-      data: permissions,
-      message: "Daftar Permissions berhasil diambil",
+      data: jsonResponse.data || jsonResponse,
+      message: "Daftar Permissions berhasil diambil dari Control Plane",
     });
-  } catch (error) {
-    console.log("ERROR", error);
-    res
-      .status(500)
-      .json({ success: false, message: "Terjadi kesalahan server", error });
+  } catch (error: any) {
+    // MENAMPILKAN FULL ERROR STACK
+    console.error("[getPermissions CRITICAL ERROR]:", error);
+    res.status(500).json({
+      success: false,
+      message: "Terjadi kesalahan server (Controller Catch)",
+      error: error.message,
+    });
   }
 };
 
@@ -41,231 +79,106 @@ export const getRoles = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const db = req.db;
-    const tenantId = req.user!.tenantId;
+    console.log("[getRoles] Memulai ekstraksi slug...");
+    const slug = extractTenantSlug(req);
+    console.log(`[getRoles] Slug ditemukan: "${slug}"`);
+    if (!slug) throw new Error("Invalid tenant slug");
 
-    const roles = await db.role.findMany({
-      where: { tenantId },
-      include: {
-        _count: { select: { users: true } }, // Menghitung berapa karyawan yang pakai role ini
-        permissions: {
-          include: { permission: true },
-        },
-      },
-      orderBy: { name: "asc" },
+    const controlPlaneUrl = process.env.CONTROL_PLANE_URL;
+    if (!controlPlaneUrl)
+      throw new Error("CONTROL_PLANE_URL is not defined di .env");
+
+    const token = generateInternalToken(slug);
+    const endpoint = `${controlPlaneUrl}/api/internal/tenant-roles?slug=${encodeURIComponent(slug)}`;
+
+    console.log(`[getRoles] Fetching ke Control Plane: ${endpoint}`);
+    const response = await fetch(endpoint, {
+      headers: { "x-internal-token": token },
+      signal: AbortSignal.timeout(5000),
     });
 
-    // Formatting agar JSON lebih rapi (menyederhanakan array permissions)
-    const formattedRoles = roles.map((role) => ({
-      ...role,
-      permissions: role.permissions.map((rp) => rp.permission),
-    }));
+    const jsonResponse = await response.json().catch(() => ({}));
+    console.log("[getRoles] Respon dari Control Plane diterima:", jsonResponse);
+
+    if (!response.ok) {
+      res.status(response.status).json({
+        success: false,
+        message:
+          jsonResponse.message || "Gagal mengambil roles dari Control Plane",
+      });
+      return;
+    }
 
     res.status(200).json({
       success: true,
-      data: formattedRoles,
-      message: "Daftar Role berhasil diambil",
+      data: jsonResponse.data || jsonResponse,
+      message: "Daftar Role berhasil diambil dari Control Plane",
     });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ success: false, message: "Terjadi kesalahan server", error });
+  } catch (error: any) {
+    // MENAMPILKAN FULL ERROR STACK
+    console.error("[getRoles CRITICAL ERROR]:", error);
+    res.status(500).json({
+      success: false,
+      message: "Terjadi kesalahan server (Controller Catch)",
+      error: error.message,
+    });
   }
 };
 
-// [GET] Ambil Detail 1 Role
+// [GET] Ambil Detail 1 Role beserta Permissions-nya
 export const getRoleById = async (
   req: AuthRequest,
   res: Response,
 ): Promise<void> => {
   try {
-    const db = req.db;
-    const tenantId = req.user!.tenantId;
-    const roleId = req.params.id;
+    console.log("[getRoleById] Memulai ekstraksi slug...");
+    const slug = extractTenantSlug(req);
+    if (!slug) throw new Error("Invalid tenant slug");
 
-    const role = await db.role.findFirst({
-      where: { id: String(roleId), tenantId },
-      include: {
-        permissions: {
-          include: { permission: true },
-        },
-      },
+    const roleId = String(req.params.id);
+    console.log(`[getRoleById] Slug: "${slug}", RoleID: "${roleId}"`);
+
+    const controlPlaneUrl = process.env.CONTROL_PLANE_URL;
+    if (!controlPlaneUrl)
+      throw new Error("CONTROL_PLANE_URL is not defined di .env");
+
+    const token = generateInternalToken(slug);
+    const endpoint = `${controlPlaneUrl}/api/internal/tenant-permissions?slug=${encodeURIComponent(slug)}&roleId=${encodeURIComponent(roleId)}`;
+
+    console.log(`[getRoleById] Fetching ke Control Plane: ${endpoint}`);
+    const response = await fetch(endpoint, {
+      headers: { "x-internal-token": token },
+      signal: AbortSignal.timeout(5000),
     });
 
-    if (!role) {
-      res.status(404).json({ success: false, message: "Role tidak ditemukan" });
-      return;
-    }
+    const jsonResponse = await response.json().catch(() => ({}));
+    console.log(
+      "[getRoleById] Respon dari Control Plane diterima:",
+      jsonResponse,
+    );
 
-    const formattedRole = {
-      ...role,
-      permissions: role.permissions.map((rp) => rp.permission),
-    };
-
-    res.status(200).json({
-      success: true,
-      data: formattedRole,
-      message: "Detail Role berhasil diambil",
-    });
-  } catch (error) {
-    console.log("ERROR", error);
-    res
-      .status(500)
-      .json({ success: false, message: "Terjadi kesalahan server", error });
-  }
-};
-
-// [POST] Buat Role Baru + Assign Hak Akses
-export const createRole = async (
-  req: AuthRequest,
-  res: Response,
-): Promise<void> => {
-  try {
-    const db = req.db;
-    const tenantId = req.user!.tenantId;
-
-    // permissionIds adalah array string berisi ID dari tabel Permission (Cth: ["uuid-1", "uuid-2"])
-    const { name, description, permissionIds } = req.body;
-
-    // Cek duplikasi nama role
-    const existingRole = await db.role.findFirst({
-      where: { name, tenantId },
-    });
-
-    if (existingRole) {
-      res
-        .status(400)
-        .json({ success: false, message: "Nama Role sudah digunakan" });
-      return;
-    }
-
-    const newRole = await db.role.create({
-      data: {
-        tenantId,
-        name,
-        description,
-        permissions: {
-          create: permissionIds.map((id: string) => ({
-            permissionId: id,
-          })),
-        },
-      },
-      include: {
-        permissions: { include: { permission: true } },
-      },
-    });
-
-    res.status(201).json({
-      success: true,
-      data: newRole,
-      message: "Role berhasil dibuat",
-    });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ success: false, message: "Terjadi kesalahan server", error });
-  }
-};
-
-// [PUT] Update Role & Ubah Hak Akses
-export const updateRole = async (
-  req: AuthRequest,
-  res: Response,
-): Promise<void> => {
-  try {
-    const db = req.db;
-    const tenantId = req.user!.tenantId;
-    const roleId = req.params.id;
-    const { name, description, permissionIds } = req.body;
-
-    const existingRole = await db.role.findFirst({
-      where: { id: String(roleId), tenantId },
-    });
-
-    if (!existingRole) {
-      res.status(404).json({ success: false, message: "Role tidak ditemukan" });
-      return;
-    }
-
-    // Menggunakan transaksi agar penghapusan dan penambahan permission sinkron
-    const updatedRole = await db.$transaction(async (tx) => {
-      // 1. Update data dasar role
-      const role = await tx.role.update({
-        where: { id: String(roleId) },
-        data: { name, description },
-      });
-
-      // 2. Jika permissionIds dikirim, kita hapus relasi lama dan masukkan yang baru (Sync)
-      if (permissionIds && Array.isArray(permissionIds)) {
-        await tx.rolePermission.deleteMany({
-          where: { roleId: String(roleId) },
-        });
-
-        await tx.rolePermission.createMany({
-          data: permissionIds.map((permId: string) => ({
-            roleId: String(roleId),
-            permissionId: permId,
-          })),
-        });
-      }
-
-      return role;
-    });
-
-    res.status(200).json({
-      success: true,
-      data: updatedRole,
-      message: "Role beserta hak aksesnya berhasil diperbarui",
-    });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ success: false, message: "Terjadi kesalahan server", error });
-  }
-};
-
-// [DELETE] Hapus Role
-export const deleteRole = async (
-  req: AuthRequest,
-  res: Response,
-): Promise<void> => {
-  try {
-    const db = req.db;
-    const tenantId = req.user!.tenantId;
-    const roleId = req.params.id;
-
-    // Jangan izinkan menghapus role 'Owner' default (Optional safety guard)
-    const existingRole = await db.role.findFirst({
-      where: { id: String(roleId), tenantId },
-      include: { _count: { select: { users: true } } },
-    });
-
-    if (!existingRole) {
-      res.status(404).json({ success: false, message: "Role tidak ditemukan" });
-      return;
-    }
-
-    // Proteksi: Tidak boleh menghapus role yang masih digunakan oleh user/karyawan
-    if (existingRole._count.users > 0) {
-      res.status(400).json({
+    if (!response.ok) {
+      res.status(response.status).json({
         success: false,
-        message: `Tidak dapat menghapus Role ini karena masih digunakan oleh ${existingRole._count.users} karyawan.`,
+        message:
+          jsonResponse.message ||
+          "Gagal mengambil detail role dari Control Plane",
       });
       return;
     }
 
-    // Menghapus Role akan memicu Cascade delete pada tabel `RolePermission`
-    await db.role.delete({
-      where: { id: String(roleId) },
-    });
-
     res.status(200).json({
       success: true,
-      message: "Role berhasil dihapus",
+      data: jsonResponse.data || jsonResponse,
+      message: "Detail Role berhasil diambil dari Control Plane",
     });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ success: false, message: "Terjadi kesalahan server", error });
+  } catch (error: any) {
+    // MENAMPILKAN FULL ERROR STACK
+    console.error("[getRoleById CRITICAL ERROR]:", error);
+    res.status(500).json({
+      success: false,
+      message: "Terjadi kesalahan server (Controller Catch)",
+      error: error.message,
+    });
   }
 };

@@ -9,7 +9,6 @@ declare global {
     interface Request {
       tenantSlug: string;
       db: PrismaClient;
-      // Memindahkan informasi user JWT dari middleware auth agar menyatu
       user?: {
         id: string;
         tenantId: string;

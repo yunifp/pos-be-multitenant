@@ -1,8 +1,10 @@
 // src/middlewares/auth.middleware.ts
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { generateInternalToken } from "../lib/internal-auth";
+import { extractTenantSlug } from "./tenant.middleware";
 
-// Extend Request agar mengenali req.db dan req.user (Sama seperti di Controller)
+// Extend Request agar mengenali req.db dan req.user
 export interface AuthRequest extends Request {
   user?: {
     id: string;
@@ -33,13 +35,13 @@ export const verifyToken = async (
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET) as any;
 
-    // PERBAIKAN: Gunakan req.db yang di-inject oleh tenant.middleware
+    // Gunakan req.db yang di-inject oleh tenant.middleware
     const db = req.db;
 
-    // Cek apakah user masih ada di database tenant dan statusnya aktif
+    // Cek apakah user masih ada di database tenant lokal dan statusnya aktif
     const user = await db.user.findUnique({
       where: { id: decoded.id },
-      include: { tenant: true },
+      include: { tenant: true }, // Ambil relasi tenant lokal
     });
 
     if (!user || !user.isActive) {
@@ -59,7 +61,7 @@ export const verifyToken = async (
     // Attach data user ke request untuk dipakai di controller selanjutnya
     req.user = {
       id: user.id,
-      tenantId: user.tenantId,
+      tenantId: user.tenantId, // ID Tenant Lokal
       branchId: user.branchId,
       roleId: user.roleId,
       email: user.email,
@@ -67,7 +69,7 @@ export const verifyToken = async (
 
     next();
   } catch (error) {
-    // Tambahkan log untuk memudahkan Anda sebagai DevOps melakukan debugging jika terjadi error lain
+    // Tambahkan log untuk memudahkan debugging
     console.error("[Auth Middleware Error]:", error);
     res
       .status(401)
@@ -75,7 +77,7 @@ export const verifyToken = async (
   }
 };
 
-// 2. Middleware Dynamic RBAC untuk mengecek Permission
+// 2. Middleware Dynamic RBAC untuk mengecek Permission (Terkoneksi ke Control Plane)
 export const requirePermission = (requiredPermissionCode: string) => {
   return async (
     req: AuthRequest,
@@ -88,18 +90,43 @@ export const requirePermission = (requiredPermissionCode: string) => {
         return;
       }
 
-      // PERBAIKAN: Gunakan req.db di sini juga
-      const db = req.db;
+      // Ekstrak slug untuk berkomunikasi dengan Control Plane
+      const slug = extractTenantSlug(req);
+      if (!slug) throw new Error("Invalid tenant slug");
 
-      // Cek ke database apakah Role ID user memiliki Permission Code yang diminta
-      const hasPermission = await db.rolePermission.findFirst({
-        where: {
-          roleId: req.user.roleId,
-          permission: {
-            code: requiredPermissionCode,
-          },
-        },
+      const controlPlaneUrl = process.env.CONTROL_PLANE_URL;
+      if (!controlPlaneUrl) throw new Error("CONTROL_PLANE_URL is not defined");
+
+      const token = generateInternalToken(slug);
+
+      // Cek ke Control Plane apakah Role ID user memiliki Permission Code yang diminta
+      const endpoint = `${controlPlaneUrl}/api/internal/tenant-permissions?slug=${encodeURIComponent(slug)}&roleId=${encodeURIComponent(req.user.roleId)}`;
+
+      const response = await fetch(endpoint, {
+        headers: { "x-internal-token": token },
+        signal: AbortSignal.timeout(5000),
       });
+
+      const jsonResponse = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        res.status(500).json({
+          message: "Gagal memverifikasi hak akses ke Control Plane",
+          error: jsonResponse,
+        });
+        return;
+      }
+
+      // Format response Control Plane menjadi flat array string (misal: ["BRANCH_CREATE", "BRANCH_READ"])
+      let userPermissions: string[] = [];
+      if (jsonResponse.success && Array.isArray(jsonResponse.data)) {
+        userPermissions = jsonResponse.data.flatMap((mod: any) =>
+          mod.permissions.map((p: any) => p.code),
+        );
+      }
+
+      // Validasi apakah array permission mengandung code yang di-require
+      const hasPermission = userPermissions.includes(requiredPermissionCode);
 
       if (!hasPermission) {
         res.status(403).json({
